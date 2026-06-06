@@ -33,8 +33,9 @@ The first working slice is implemented:
 - [ace.py](ace.py): core `Variable`, `Tokens`, `Batch`, ACE transformer, shared
   continuous MDN head, shared masked categorical head, prediction object, loss,
   and autoregressive sampling helper.
-- [demo.py](demo.py): Gaussian toy with two continuous latents, runtime prior
-  injection, online training, and an analytic grid posterior diagnostic.
+- [demo.py](demo.py): Gaussian toy with two continuous latents, fixed latent
+  priors, online training, and an analytic grid posterior diagnostic that
+  deliberately evaluates an ambiguous low-context posterior.
 - [DEVLOG.md](DEVLOG.md): design decisions and rationale. Read this before
   changing architecture or scope.
 
@@ -63,6 +64,39 @@ Run the demo:
 .\.venv\Scripts\python.exe demo.py
 ```
 
+The demo trains online, prints posterior moment diagnostics against the analytic
+Gaussian oracle, and saves a plot to `artifacts/gaussian_toy.png` by default.
+Evaluation uses a small context by default and selects a coupled posterior from
+several candidate draws, so the joint diagnostic is not a collapsed factorized
+case.
+The plot also compares the posterior predictive density for a new `y`; the
+analytic predictive is computed by marginalizing over the posterior grid, not by
+plugging posterior moments into a Gaussian.
+The selected held-out observation is saved as
+`artifacts/gaussian_toy_eval_case.pt`; later eval runs reuse it unless
+`--refresh-eval-case` is passed.
+Training sometimes reveals one latent as a context value and asks for the other,
+so the autoregressive diagnostic is trained on the conditional latent queries it
+uses at evaluation time.
+
+Useful demo controls:
+
+```powershell
+.\.venv\Scripts\python.exe demo.py --eval-context 3 --eval-candidates 64 --latent-context-prob 0.25
+```
+
+The current retained local diagnostic artifacts are:
+
+- `artifacts/gaussian_toy_ambiguous.pt`
+- `artifacts/gaussian_toy_ambiguous.png`
+- `artifacts/gaussian_toy_eval_case.pt`
+
+Regenerate that retained diagnostic:
+
+```powershell
+.\.venv\Scripts\python.exe demo.py --steps 5000 --refresh-eval-case --save-checkpoint artifacts/gaussian_toy_ambiguous.pt --plot-path artifacts/gaussian_toy_ambiguous.png
+```
+
 For a quick smoke test:
 
 ```powershell
@@ -73,6 +107,19 @@ To force CPU:
 
 ```powershell
 .\.venv\Scripts\python.exe demo.py --device cpu --steps 20
+```
+
+Save and reuse a small demo checkpoint:
+
+```powershell
+.\.venv\Scripts\python.exe demo.py --save-checkpoint artifacts/gaussian_toy.pt
+.\.venv\Scripts\python.exe demo.py --eval-only --load-checkpoint artifacts/gaussian_toy.pt
+```
+
+Run a loose multi-seed smoke check:
+
+```powershell
+.\.venv\Scripts\python.exe demo.py --smoke --smoke-seeds 3 --smoke-steps 150
 ```
 
 ## Design Notes
@@ -118,5 +165,5 @@ values local, readable code over benchmark machinery. In particular:
 - prefer changing the implementation when a simpler or more robust tweak serves
   ACE's conditioning interface better than paper fidelity.
 
-Generated directories such as `.venv/`, `__pycache__/`, and `temp/` are ignored.
-
+Generated directories such as `.venv/`, `__pycache__/`, `temp/`, and
+`artifacts/` are ignored.

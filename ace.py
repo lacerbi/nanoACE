@@ -487,16 +487,30 @@ class ACE(nn.Module):
 
 
 @torch.no_grad()
-def sample_ar(model: ACE, batch: Batch, order: Sequence[int] | None = None) -> Tokens:
+def sample_ar(
+    model: ACE,
+    batch: Batch,
+    order: Sequence[int] | None = None,
+    *,
+    random_order: bool = True,
+) -> Tokens:
     """Autoregressively sample target tokens by appending sampled values to context.
 
     This is the explicit joint-distribution path. The base model predicts
     conditionally independent target marginals; autoregression turns sampled
     targets into additional context so later targets can depend on earlier ones.
+    With `order=None`, the target order is randomized by default; pass an
+    explicit `order` or `random_order=False` for deterministic sampling.
     """
 
     _, t = batch.target.shape
-    order = list(range(t)) if order is None else list(order)
+    if order is None:
+        if random_order:
+            order = torch.randperm(t, device=batch.target.var_id.device).tolist()
+        else:
+            order = list(range(t))
+    else:
+        order = list(order)
     context = batch.context
     sampled: list[Tokens | None] = [None] * t
     for j in order:

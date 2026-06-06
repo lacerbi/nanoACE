@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import math
-from dataclasses import dataclass
+from copy import copy
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import torch
 
-from ace import ACE, ACEConfig, Batch, Tokens, Variable, PRIOR, QUERY, VALUE
+from ace import ACE, ACEConfig, Batch, Tokens, Variable, cat_tokens, QUERY, VALUE
 
 
 MU_RANGE = (-1.5, 1.5)
@@ -25,11 +27,26 @@ class ToyBatch:
     log_sigma: torch.Tensor
 
 
+@dataclass
+class Diagnostic:
+    """Held-out posterior comparison for one toy problem."""
+
+    toy: ToyBatch
+    oracle: dict[str, torch.Tensor]
+    mu_logp: torch.Tensor
+    logsig_logp: torch.Tensor
+    joint_logp: torch.Tensor
+    y_grid: torch.Tensor
+    oracle_y_pred: torch.Tensor
+    model_y_logp: torch.Tensor
+    metrics: dict[str, float]
+
+
 def variables(n_bins: int) -> list[Variable]:
     """Schema for the toy task.
 
     `y` is observed data. `mu` and `log_sigma` are interpretable continuous
-    latents with runtime priors. We model sigma in log-space because it is
+    latents sampled from fixed priors. We model sigma in log-space because it is
     positive and the Gaussian likelihood is better behaved there.
     """
 
@@ -40,39 +57,15 @@ def variables(n_bins: int) -> list[Variable]:
     ]
 
 
-def _normal_pdf(x: torch.Tensor, loc: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    z = (x - loc) / scale.clamp_min(1e-6)
-    return torch.exp(-0.5 * z.pow(2)) / (scale.clamp_min(1e-6) * math.sqrt(2.0 * math.pi))
-
-
-def sample_smooth_priors(
+def fixed_prior(
     batch: int,
     bins: int,
-    value_range: tuple[float, float],
     *,
     device: torch.device | str,
 ) -> torch.Tensor:
-    """Sample simple smooth histogram priors.
+    """Uniform latent prior used by the Gaussian toy oracle and sampler."""
 
-    This is intentionally much simpler than the paper's prior generator. It
-    still trains the important behavior: the prior token can be sharp, broad, or
-    mildly multimodal, and the model must combine it with observed data.
-    """
-
-    lo, hi = value_range
-    centers = torch.linspace(lo, hi, bins, device=device)
-    width = hi - lo
-    k2 = torch.rand(batch, 1, device=device) < 0.35
-    loc1 = lo + width * torch.rand(batch, 1, device=device)
-    loc2 = lo + width * torch.rand(batch, 1, device=device)
-    scale1 = width * (0.05 + 0.30 * torch.rand(batch, 1, device=device))
-    scale2 = width * (0.05 + 0.30 * torch.rand(batch, 1, device=device))
-    w = torch.rand(batch, 1, device=device)
-    p1 = _normal_pdf(centers[None, :], loc1, scale1)
-    p2 = _normal_pdf(centers[None, :], loc2, scale2)
-    probs = torch.where(k2, w * p1 + (1.0 - w) * p2, p1)
-    probs = probs + 0.03 / width
-    return probs / probs.sum(dim=-1, keepdim=True)
+    return torch.full((batch, bins), 1.0 / bins, device=device)
 
 
 def sample_from_hist(
@@ -124,17 +117,19 @@ def sample_toy_batch(
     data_targets: int,
     bins: int,
     device: torch.device | str,
+    latent_context_prob: float = 0.0,
 ) -> ToyBatch:
     """Generate one online training/eval batch.
 
-    Context contains a variable number of observed `y` samples plus two prior
-    tokens, one for `mu` and one for `log_sigma`. Targets ask for the two
-    latents and a few held-out `y` values, which keeps the model trained on both
-    data prediction and latent prediction.
+    Context contains a variable number of observed `y` samples. Targets ask for
+    the two latents and a few held-out `y` values, which keeps the model trained
+    on both data prediction and latent prediction. During training, one latent
+    can also be revealed as a context VALUE token so autoregressive latent
+    conditioning is in-distribution.
     """
 
-    prior_mu = sample_smooth_priors(batch_size, bins, MU_RANGE, device=device)
-    prior_logsig = sample_smooth_priors(batch_size, bins, LOGSIG_RANGE, device=device)
+    prior_mu = fixed_prior(batch_size, bins, device=device)
+    prior_logsig = fixed_prior(batch_size, bins, device=device)
     mu = sample_from_hist(prior_mu, MU_RANGE)
     log_sigma = sample_from_hist(prior_logsig, LOGSIG_RANGE)
     sigma = log_sigma.exp()
@@ -143,20 +138,30 @@ def sample_toy_batch(
     y = mu[:, None] + sigma[:, None] * torch.randn(batch_size, total_y, device=device)
     n_ctx = torch.randint(min_context, max_context + 1, (batch_size,), device=device)
     ar = torch.arange(max_context, device=device)[None, :]
+    if latent_context_prob > 0.0:
+        reveal = torch.rand(batch_size, device=device) < latent_context_prob
+        reveal_mu = reveal & (torch.rand(batch_size, device=device) < 0.5)
+        reveal_logsig = reveal & ~reveal_mu
+    else:
+        reveal_mu = torch.zeros(batch_size, device=device, dtype=torch.bool)
+        reveal_logsig = torch.zeros(batch_size, device=device, dtype=torch.bool)
 
-    ctx_var = torch.zeros(batch_size, max_context + 2, device=device, dtype=torch.long)
-    ctx_var[:, max_context] = 1
-    ctx_var[:, max_context + 1] = 2
-    ctx_value = torch.zeros(batch_size, max_context + 2, device=device)
+    ctx_t = max_context + 2
+    mu_value_pos = max_context
+    logsig_value_pos = max_context + 1
+    ctx_var = torch.zeros(batch_size, ctx_t, device=device, dtype=torch.long)
+    ctx_var[:, mu_value_pos] = 1
+    ctx_var[:, logsig_value_pos] = 2
+    ctx_value = torch.zeros(batch_size, ctx_t, device=device)
     ctx_value[:, :max_context] = y[:, :max_context]
-    ctx_prior = torch.zeros(batch_size, max_context + 2, bins, device=device)
-    ctx_prior[:, max_context, :] = prior_mu
-    ctx_prior[:, max_context + 1, :] = prior_logsig
-    ctx_mode = torch.full((batch_size, max_context + 2), VALUE, device=device)
-    ctx_mode[:, max_context:] = PRIOR
-    ctx_mask = torch.zeros(batch_size, max_context + 2, device=device, dtype=torch.bool)
+    ctx_value[:, mu_value_pos] = mu
+    ctx_value[:, logsig_value_pos] = log_sigma
+    ctx_prior = torch.zeros(batch_size, ctx_t, bins, device=device)
+    ctx_mode = torch.full((batch_size, ctx_t), VALUE, device=device)
+    ctx_mask = torch.zeros(batch_size, ctx_t, device=device, dtype=torch.bool)
     ctx_mask[:, :max_context] = ar < n_ctx[:, None]
-    ctx_mask[:, max_context:] = True
+    ctx_mask[:, mu_value_pos] = reveal_mu
+    ctx_mask[:, logsig_value_pos] = reveal_logsig
     context = make_tokens(
         var_id=ctx_var,
         value=ctx_value,
@@ -174,12 +179,15 @@ def sample_toy_batch(
     tgt_value[:, 0] = mu
     tgt_value[:, 1] = log_sigma
     tgt_value[:, 2:] = y[:, max_context:]
+    tgt_mask = torch.ones(batch_size, tgt_t, device=device, dtype=torch.bool)
+    tgt_mask[:, 0] = ~reveal_mu
+    tgt_mask[:, 1] = ~reveal_logsig
     target = make_tokens(
         var_id=tgt_var,
         value=tgt_value,
         prior=torch.zeros(batch_size, tgt_t, bins, device=device),
         mode=torch.full((batch_size, tgt_t), QUERY, device=device),
-        mask=torch.ones(batch_size, tgt_t, device=device, dtype=torch.bool),
+        mask=tgt_mask,
         x_dim=1,
     )
     return ToyBatch(Batch(vars_, context, target), y[:, :max_context], prior_mu, prior_logsig, mu, log_sigma)
@@ -196,6 +204,30 @@ def _repeat_tokens(tokens: Tokens, repeats: int) -> Tokens:
         prior=tokens.prior.repeat(repeats, 1, 1),
         mode=tokens.mode.repeat(repeats, 1),
         mask=tokens.mask.repeat(repeats, 1),
+    )
+
+
+def value_token(
+    model: ACE,
+    *,
+    var_id: int,
+    values: torch.Tensor,
+) -> Tokens:
+    """Build VALUE tokens for a latent grid value.
+
+    This is used by the autoregressive diagnostic: after predicting one latent,
+    we append a concrete sampled/grid value to the context before querying the
+    next latent.
+    """
+
+    b = values.numel()
+    return make_tokens(
+        var_id=torch.full((b, 1), var_id, device=values.device),
+        value=values[:, None],
+        prior=torch.zeros(b, 1, model.cfg.prior_bins, device=values.device),
+        mode=torch.full((b, 1), VALUE, device=values.device),
+        mask=torch.ones(b, 1, device=values.device, dtype=torch.bool),
+        x_dim=model.cfg.x_dim,
     )
 
 
@@ -221,6 +253,79 @@ def query_log_density(
     return model(rep).log_prob(target).squeeze(1)
 
 
+def conditional_log_density(
+    model: ACE,
+    batch: Batch,
+    *,
+    known_var: int,
+    known_values: torch.Tensor,
+    query_var: int,
+    query_values: torch.Tensor,
+) -> torch.Tensor:
+    """Grid of log p(query_var | context, known_var=value).
+
+    Returns `[len(known_values), len(query_values)]`. We loop over known values
+    to keep the intermediate token batch small enough to remain readable.
+    """
+
+    rows = []
+    q = query_values.numel()
+    for known in known_values:
+        known_tok = value_token(model, var_id=known_var, values=known.expand(q))
+        context = cat_tokens([_repeat_tokens(batch.context, q), known_tok])
+        target = make_tokens(
+            var_id=torch.full((q, 1), query_var, device=query_values.device),
+            value=query_values[:, None],
+            prior=torch.zeros(q, 1, model.cfg.prior_bins, device=query_values.device),
+            mode=torch.full((q, 1), QUERY, device=query_values.device),
+            mask=torch.ones(q, 1, device=query_values.device, dtype=torch.bool),
+            x_dim=model.cfg.x_dim,
+        )
+        rows.append(model(Batch(batch.variables, context, target)).log_prob(target).squeeze(1))
+    return torch.stack(rows, dim=0)
+
+
+def ar_joint_log_density(
+    model: ACE,
+    batch: Batch,
+    mu_grid: torch.Tensor,
+    logsig_grid: torch.Tensor,
+) -> torch.Tensor:
+    """Autoregressive approximation to p(mu, log_sigma | context).
+
+    We average two factorizations in probability space:
+
+    - p(mu | D) p(log_sigma | D, mu)
+    - p(log_sigma | D) p(mu | D, log_sigma)
+
+    This is a small Janossy-style symmetrization that avoids making the plot
+    depend entirely on one arbitrary latent order.
+    """
+
+    log_mu = query_log_density(model, batch, 1, mu_grid)
+    log_s = query_log_density(model, batch, 2, logsig_grid)
+    log_s_given_mu = conditional_log_density(
+        model,
+        batch,
+        known_var=1,
+        known_values=mu_grid,
+        query_var=2,
+        query_values=logsig_grid,
+    )
+    log_mu_given_s = conditional_log_density(
+        model,
+        batch,
+        known_var=2,
+        known_values=logsig_grid,
+        query_var=1,
+        query_values=mu_grid,
+    ).transpose(0, 1)
+    joint_1 = log_mu[:, None] + log_s_given_mu
+    joint_2 = log_s[None, :] + log_mu_given_s
+    joint = torch.logsumexp(torch.stack([joint_1, joint_2], dim=0), dim=0) - math.log(2.0)
+    return joint - torch.logsumexp(joint.reshape(-1), dim=0)
+
+
 def analytic_posterior(
     y_obs: torch.Tensor,
     prior_mu: torch.Tensor,
@@ -231,7 +336,7 @@ def analytic_posterior(
     """Exact grid posterior for the Gaussian toy.
 
     The prior is factorized over (`mu`, `log_sigma`) and represented on the same
-    grids as ACE's prior tokens. Given observed data, Bayes' rule gives a
+    grids used by the toy sampler. Given observed data, Bayes' rule gives a
     normalized 2D grid posterior. We return the two 1D marginals and moments for
     a compact diagnostic.
     """
@@ -249,16 +354,57 @@ def analytic_posterior(
     post = (logpost - torch.logsumexp(logpost.reshape(-1), dim=0)).exp()
     pmu = post.sum(dim=1)
     ps = post.sum(dim=0)
+    mu_mean = (pmu * mu_grid).sum()
+    logsig_mean = (ps * logsig_grid).sum()
+    mu_std = (pmu * (mu_grid - mu_mean).pow(2)).sum().sqrt()
+    logsig_std = (ps * (logsig_grid - logsig_mean).pow(2)).sum().sqrt()
+    cov = (post * (mu_grid[:, None] - mu_mean) * (logsig_grid[None, :] - logsig_mean)).sum()
+    corr = cov / (mu_std * logsig_std).clamp_min(1e-8)
     return {
         "mu_grid": mu_grid,
         "logsig_grid": logsig_grid,
-        "mu_mean": (pmu * mu_grid).sum(),
-        "mu_std": ((pmu * (mu_grid - (pmu * mu_grid).sum()).pow(2)).sum()).sqrt(),
-        "logsig_mean": (ps * logsig_grid).sum(),
-        "logsig_std": ((ps * (logsig_grid - (ps * logsig_grid).sum()).pow(2)).sum()).sqrt(),
+        "mu_mean": mu_mean,
+        "mu_std": mu_std,
+        "logsig_mean": logsig_mean,
+        "logsig_std": logsig_std,
+        "corr": corr,
         "pmu": pmu,
         "plogsig": ps,
+        "post": post,
     }
+
+
+def predictive_grid(
+    oracle: dict[str, torch.Tensor],
+    y_obs: torch.Tensor,
+    *,
+    points: int = 256,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Analytic posterior predictive density for a new Gaussian observation.
+
+    This is not a Gaussian density. It marginalizes over the full posterior grid:
+    `sum_{mu, sigma} p(mu, log_sigma | D) Normal(y_new | mu, sigma)`.
+    """
+
+    mu_grid = oracle["mu_grid"]
+    logsig_grid = oracle["logsig_grid"]
+    sigma_grid = logsig_grid.exp()
+    post = oracle["post"]
+    mu = mu_grid[:, None]
+    sigma = sigma_grid[None, :]
+
+    pred_mean = (post * mu).sum()
+    pred_second = (post * (sigma.pow(2) + mu.pow(2))).sum()
+    pred_std = (pred_second - pred_mean.pow(2)).clamp_min(1e-8).sqrt()
+    lo = torch.minimum(y_obs.min(), pred_mean - 5.0 * pred_std)
+    hi = torch.maximum(y_obs.max(), pred_mean + 5.0 * pred_std)
+    y_grid = torch.linspace(float(lo), float(hi), points, device=mu_grid.device)
+
+    y = y_grid[None, None, :]
+    comp = -0.5 * ((y - mu[:, :, None]) / sigma[:, :, None]).pow(2)
+    comp = comp.exp() / (sigma[:, :, None] * math.sqrt(2.0 * math.pi))
+    pred = (post[:, :, None] * comp).sum(dim=(0, 1))
+    return y_grid, pred
 
 
 def normalized_moments(grid: torch.Tensor, log_density: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -270,11 +416,9 @@ def normalized_moments(grid: torch.Tensor, log_density: torch.Tensor) -> tuple[t
     return mean, std
 
 
-def train(args: argparse.Namespace) -> ACE:
-    """Train ACE online on freshly sampled Gaussian-toy batches."""
+def build_model(args: argparse.Namespace, device: torch.device) -> ACE:
+    """Construct the toy ACE model from CLI hyperparameters."""
 
-    device = torch.device(args.device)
-    torch.manual_seed(args.seed)
     vars_ = variables(args.bins)
     cfg = ACEConfig(
         x_dim=1,
@@ -286,7 +430,40 @@ def train(args: argparse.Namespace) -> ACE:
         head_hidden=args.hidden,
         mdn_components=args.components,
     )
-    model = ACE(vars_, cfg).to(device)
+    return ACE(vars_, cfg).to(device)
+
+
+def save_checkpoint(model: ACE, path: str | Path, args: argparse.Namespace) -> None:
+    """Save a lightweight demo checkpoint.
+
+    The checkpoint is a convenience artifact only: it stores the model config,
+    seed, and `state_dict`, and can always be regenerated by retraining.
+    """
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"cfg": asdict(model.cfg), "seed": args.seed, "state_dict": model.state_dict()}, path)
+    print(f"saved checkpoint: {path}")
+
+
+def load_checkpoint(path: str | Path, device: torch.device) -> ACE:
+    """Load a demo checkpoint saved by `save_checkpoint`."""
+
+    payload = torch.load(path, map_location=device, weights_only=False)
+    cfg = ACEConfig(**payload["cfg"])
+    model = ACE(variables(cfg.prior_bins), cfg).to(device)
+    model.load_state_dict(payload["state_dict"])
+    return model
+
+
+def train(args: argparse.Namespace, model: ACE | None = None) -> ACE:
+    """Train ACE online on freshly sampled Gaussian-toy batches."""
+
+    device = torch.device(args.device)
+    torch.manual_seed(args.seed)
+    model = build_model(args, device) if model is None else model
+    vars_ = model.variables
+    bins = model.cfg.prior_bins
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     for step in range(1, args.steps + 1):
         toy = sample_toy_batch(
@@ -295,8 +472,9 @@ def train(args: argparse.Namespace) -> ACE:
             max_context=args.max_context,
             min_context=args.min_context,
             data_targets=args.data_targets,
-            bins=args.bins,
+            bins=bins,
             device=device,
+            latent_context_prob=args.latent_context_prob,
         )
         loss = model.loss(toy.batch, latent_weight=args.latent_weight)
         opt.zero_grad(set_to_none=True)
@@ -308,38 +486,282 @@ def train(args: argparse.Namespace) -> ACE:
     return model
 
 
+def eval_problem_score(oracle: dict[str, torch.Tensor]) -> torch.Tensor:
+    """Rank candidate eval problems by visible posterior ambiguity.
+
+    Correlation alone can pick a nearly collapsed posterior. The width factor
+    prefers examples whose joint posterior still has enough spread to show up in
+    the diagnostic image. The margin factor avoids cases pinned against a prior
+    boundary, which are correct but make poor visual diagnostics.
+    """
+
+    width = (oracle["mu_std"] * oracle["logsig_std"]).sqrt()
+    mu_margin = torch.minimum(
+        oracle["mu_mean"] - MU_RANGE[0],
+        torch.as_tensor(MU_RANGE[1], device=oracle["mu_mean"].device) - oracle["mu_mean"],
+    ) / (MU_RANGE[1] - MU_RANGE[0])
+    logsig_margin = torch.minimum(
+        oracle["logsig_mean"] - LOGSIG_RANGE[0],
+        torch.as_tensor(LOGSIG_RANGE[1], device=oracle["logsig_mean"].device) - oracle["logsig_mean"],
+    ) / (LOGSIG_RANGE[1] - LOGSIG_RANGE[0])
+    margin = (mu_margin.clamp(0.0, 0.25) / 0.25) * (logsig_margin.clamp(0.0, 0.25) / 0.25)
+    return oracle["corr"].abs() * width * margin
+
+
+def select_eval_problem(
+    vars_: list[Variable],
+    *,
+    eval_context: int,
+    candidates: int,
+    bins: int,
+    device: torch.device | str,
+) -> tuple[ToyBatch, dict[str, torch.Tensor]]:
+    """Choose a low-context problem with an analytically coupled posterior."""
+
+    best_score = float("-inf")
+    best: tuple[ToyBatch, dict[str, torch.Tensor]] | None = None
+    for _ in range(candidates):
+        toy = sample_toy_batch(
+            vars_,
+            batch_size=1,
+            max_context=eval_context,
+            min_context=eval_context,
+            data_targets=0,
+            bins=bins,
+            device=device,
+        )
+        y_obs = toy.y_context[0, :eval_context]
+        oracle = analytic_posterior(y_obs, toy.prior_mu[0], toy.prior_logsig[0], bins=bins)
+        score = float(eval_problem_score(oracle))
+        if score > best_score:
+            best_score = score
+            best = (toy, oracle)
+    assert best is not None
+    return best
+
+
+def save_eval_case(toy: ToyBatch, path: str | Path, *, bins: int) -> None:
+    """Persist the small held-out observation used for the diagnostic plot."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    y_tokens = (toy.batch.context.var_id == 0) & toy.batch.context.mask
+    n = int(y_tokens[0].sum().item())
+    torch.save(
+        {
+            "version": 2,
+            "bins": bins,
+            "y_context": toy.y_context[0, :n].detach().cpu(),
+            "mu": toy.mu[0].detach().cpu(),
+            "log_sigma": toy.log_sigma[0].detach().cpu(),
+        },
+        path,
+    )
+    print(f"saved eval case: {path}")
+
+
+def load_eval_case(vars_: list[Variable], path: str | Path, *, bins: int, device: torch.device | str) -> ToyBatch:
+    """Load a persisted held-out observation and reconstruct ACE tokens."""
+
+    payload = torch.load(path, map_location=device, weights_only=False)
+    if int(payload["bins"]) != bins:
+        raise ValueError(f"eval case has {payload['bins']} bins, model expects {bins}")
+
+    y_obs = payload["y_context"].to(device)
+    prior_mu = fixed_prior(1, bins, device=device)[0]
+    prior_logsig = fixed_prior(1, bins, device=device)[0]
+    mu = payload["mu"].reshape(1).to(device)
+    log_sigma = payload["log_sigma"].reshape(1).to(device)
+    n = int(y_obs.numel())
+
+    ctx_t = n
+    ctx_var = torch.zeros(1, ctx_t, device=device, dtype=torch.long)
+    ctx_value = torch.zeros(1, ctx_t, device=device)
+    ctx_value[:, :n] = y_obs[None, :]
+    ctx_prior = torch.zeros(1, ctx_t, bins, device=device)
+    ctx_mode = torch.full((1, ctx_t), VALUE, device=device)
+    ctx_mask = torch.ones(1, ctx_t, device=device, dtype=torch.bool)
+    context = make_tokens(
+        var_id=ctx_var,
+        value=ctx_value,
+        prior=ctx_prior,
+        mode=ctx_mode,
+        mask=ctx_mask,
+        x_dim=1,
+    )
+
+    tgt_var = torch.tensor([[1, 2]], device=device)
+    tgt_value = torch.stack([mu, log_sigma], dim=1)
+    target = make_tokens(
+        var_id=tgt_var,
+        value=tgt_value,
+        prior=torch.zeros(1, 2, bins, device=device),
+        mode=torch.full((1, 2), QUERY, device=device),
+        mask=torch.ones(1, 2, device=device, dtype=torch.bool),
+        x_dim=1,
+    )
+    return ToyBatch(
+        Batch(vars_, context, target),
+        y_obs[None, :],
+        prior_mu[None, :],
+        prior_logsig[None, :],
+        mu,
+        log_sigma,
+    )
+
+
 @torch.no_grad()
-def evaluate(model: ACE, args: argparse.Namespace) -> None:
-    """Compare ACE's posterior marginals with the analytic grid oracle."""
+def evaluate(model: ACE, args: argparse.Namespace) -> Diagnostic:
+    """Compare ACE's posterior marginals and AR joint with the analytic oracle."""
 
     device = next(model.parameters()).device
     vars_ = model.variables
-    toy = sample_toy_batch(
-        vars_,
-        batch_size=1,
-        max_context=args.max_context,
-        min_context=args.max_context,
-        data_targets=0,
-        bins=args.bins,
-        device=device,
-    )
-    ctx = toy.batch.context
-    n = int(ctx.mask[:, : args.max_context].sum().item())
-    y_obs = toy.y_context[0, :n]
-    true = analytic_posterior(y_obs, toy.prior_mu[0], toy.prior_logsig[0], bins=args.bins)
+    bins = model.cfg.prior_bins
+    torch.manual_seed(args.seed + 10_000)
+    eval_context = max(1, args.eval_context)
+    eval_candidates = max(1, args.eval_candidates)
+    eval_case_path = Path(args.eval_case_path) if args.eval_case_path else None
+    if eval_case_path is not None and eval_case_path.exists() and not args.refresh_eval_case:
+        toy = load_eval_case(vars_, eval_case_path, bins=bins, device=device)
+        true = analytic_posterior(toy.y_context[0], toy.prior_mu[0], toy.prior_logsig[0], bins=bins)
+        eval_source = f"saved case {eval_case_path}"
+    else:
+        toy, true = select_eval_problem(
+            vars_,
+            eval_context=eval_context,
+            candidates=eval_candidates,
+            bins=bins,
+            device=device,
+        )
+        eval_source = f"{eval_candidates} candidates"
+        if eval_case_path is not None:
+            save_eval_case(toy, eval_case_path, bins=bins)
+    eval_context = int(toy.y_context.shape[1])
     mu_grid = true["mu_grid"]
     logsig_grid = true["logsig_grid"]
     mu_logp = query_log_density(model, toy.batch, 1, mu_grid)
     logsig_logp = query_log_density(model, toy.batch, 2, logsig_grid)
+    joint_logp = ar_joint_log_density(model, toy.batch, mu_grid, logsig_grid)
+    y_grid, oracle_y_pred = predictive_grid(true, toy.y_context[0])
+    model_y_logp = query_log_density(model, toy.batch, 0, y_grid)
     mu_mean, mu_std = normalized_moments(mu_grid, mu_logp)
     logsig_mean, logsig_std = normalized_moments(logsig_grid, logsig_logp)
+    oracle_y_mean, oracle_y_std = normalized_moments(y_grid, oracle_y_pred.clamp_min(1e-30).log())
+    model_y_mean, model_y_std = normalized_moments(y_grid, model_y_logp)
+    p_joint = joint_logp.exp()
+    joint_mu_mean = (p_joint.sum(dim=1) * mu_grid).sum()
+    joint_s_mean = (p_joint.sum(dim=0) * logsig_grid).sum()
+    metrics = {
+        "mu_mean_abs_err": float((mu_mean - true["mu_mean"]).abs()),
+        "mu_std_abs_err": float((mu_std - true["mu_std"]).abs()),
+        "logsig_mean_abs_err": float((logsig_mean - true["logsig_mean"]).abs()),
+        "logsig_std_abs_err": float((logsig_std - true["logsig_std"]).abs()),
+        "joint_mu_mean_abs_err": float((joint_mu_mean - true["mu_mean"]).abs()),
+        "joint_logsig_mean_abs_err": float((joint_s_mean - true["logsig_mean"]).abs()),
+        "pred_y_mean_abs_err": float((model_y_mean - oracle_y_mean).abs()),
+        "pred_y_std_abs_err": float((model_y_std - oracle_y_std).abs()),
+        "oracle_corr": float(true["corr"]),
+    }
     print("\nHeld-out Gaussian toy posterior moments")
+    print(f"eval context    {eval_context} observations from {eval_source}")
     print(f"truth mu        {float(toy.mu[0]): .3f}")
     print(f"truth sigma     {float(toy.log_sigma[0].exp()): .3f}")
+    print(f"oracle corr     {float(true['corr']): .3f}")
     print(f"oracle mu       mean {float(true['mu_mean']): .3f}  std {float(true['mu_std']): .3f}")
     print(f"model  mu       mean {float(mu_mean): .3f}  std {float(mu_std): .3f}")
     print(f"oracle log_sig  mean {float(true['logsig_mean']): .3f}  std {float(true['logsig_std']): .3f}")
     print(f"model  log_sig  mean {float(logsig_mean): .3f}  std {float(logsig_std): .3f}")
+    print(f"oracle pred y   mean {float(oracle_y_mean): .3f}  std {float(oracle_y_std): .3f}")
+    print(f"model  pred y   mean {float(model_y_mean): .3f}  std {float(model_y_std): .3f}")
+    print(f"AR joint mean   mu {float(joint_mu_mean): .3f}  log_sig {float(joint_s_mean): .3f}")
+    return Diagnostic(toy, true, mu_logp, logsig_logp, joint_logp, y_grid, oracle_y_pred, model_y_logp, metrics)
+
+
+def plot_diagnostic(diag: Diagnostic, path: str | Path) -> None:
+    """Save a compact posterior diagnostic figure."""
+
+    import matplotlib.pyplot as plt
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mu = diag.oracle["mu_grid"].detach().cpu()
+    logsig = diag.oracle["logsig_grid"].detach().cpu()
+    oracle_joint = diag.oracle["post"].detach().cpu().T
+    model_joint = diag.joint_logp.exp().detach().cpu().T
+    oracle_mu = diag.oracle["pmu"].detach().cpu()
+    oracle_s = diag.oracle["plogsig"].detach().cpu()
+    model_mu = (diag.mu_logp - torch.logsumexp(diag.mu_logp, dim=0)).exp().detach().cpu()
+    model_s = (diag.logsig_logp - torch.logsumexp(diag.logsig_logp, dim=0)).exp().detach().cpu()
+    y_grid = diag.y_grid.detach().cpu()
+    oracle_y = diag.oracle_y_pred.detach().cpu()
+    model_y = diag.model_y_logp.exp().detach().cpu()
+    y_obs = diag.toy.y_context[0].detach().cpu()
+
+    fig = plt.figure(figsize=(9, 9), constrained_layout=True)
+    gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 0.85])
+    ax_oracle_joint = fig.add_subplot(gs[0, 0])
+    ax_model_joint = fig.add_subplot(gs[0, 1])
+    ax_mu = fig.add_subplot(gs[1, 0])
+    ax_s = fig.add_subplot(gs[1, 1])
+    ax_pred = fig.add_subplot(gs[2, :])
+
+    extent = [float(mu[0]), float(mu[-1]), float(logsig[0]), float(logsig[-1])]
+    ax_oracle_joint.imshow(oracle_joint, origin="lower", aspect="auto", extent=extent)
+    ax_oracle_joint.set_title("Oracle joint")
+    ax_model_joint.imshow(model_joint, origin="lower", aspect="auto", extent=extent)
+    ax_model_joint.set_title("ACE AR joint")
+    for ax in (ax_oracle_joint, ax_model_joint):
+        ax.set_xlabel("mu")
+        ax.set_ylabel("log_sigma")
+
+    ax_mu.plot(mu, oracle_mu, label="oracle")
+    ax_mu.plot(mu, model_mu, label="ACE")
+    ax_mu.set_title("mu marginal")
+    ax_mu.set_xlabel("mu")
+    ax_mu.legend()
+
+    ax_s.plot(logsig, oracle_s, label="oracle")
+    ax_s.plot(logsig, model_s, label="ACE")
+    ax_s.set_title("log_sigma marginal")
+    ax_s.set_xlabel("log_sigma")
+    ax_s.legend()
+
+    ax_pred.plot(y_grid, oracle_y, label="oracle")
+    ax_pred.plot(y_grid, model_y, label="ACE")
+    for y in y_obs:
+        ax_pred.axvline(float(y), color="0.25", alpha=0.2, linewidth=1.0)
+    ax_pred.set_title("posterior predictive")
+    ax_pred.set_xlabel("new y")
+    ax_pred.set_ylabel("density")
+    ax_pred.legend()
+
+    y_tokens = (diag.toy.batch.context.var_id == 0) & diag.toy.batch.context.mask
+    eval_n = int(y_tokens[0].sum().item())
+    fig.suptitle(f"eval N={eval_n}, oracle corr={float(diag.oracle['corr']):.2f}")
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    print(f"saved diagnostic plot: {path}")
+
+
+def run_smoke(args: argparse.Namespace) -> None:
+    """Loose multi-seed smoke check for the Gaussian toy."""
+
+    rows = []
+    for seed in range(args.smoke_seeds):
+        a = copy(args)
+        a.seed = seed
+        a.steps = args.smoke_steps
+        a.plot_path = ""
+        print(f"\n[smoke seed {seed}]")
+        model = train(a)
+        diag = evaluate(model, a)
+        rows.append(diag.metrics)
+    mean_mu = sum(r["mu_mean_abs_err"] for r in rows) / len(rows)
+    mean_s = sum(r["logsig_mean_abs_err"] for r in rows) / len(rows)
+    print("\nSmoke summary")
+    print(f"seeds: {args.smoke_seeds}")
+    print(f"mean abs error, mu posterior mean:       {mean_mu:.3f}")
+    print(f"mean abs error, log_sigma posterior mean:{mean_s:.3f}")
 
 
 def main() -> None:
@@ -349,8 +771,12 @@ def main() -> None:
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--bins", type=int, default=64)
-    p.add_argument("--max-context", type=int, default=24)
-    p.add_argument("--min-context", type=int, default=6)
+    p.add_argument("--max-context", type=int, default=16)
+    p.add_argument("--min-context", type=int, default=2)
+    p.add_argument("--eval-context", type=int, default=3)
+    p.add_argument("--eval-candidates", type=int, default=64)
+    p.add_argument("--eval-case-path", default="artifacts/gaussian_toy_eval_case.pt")
+    p.add_argument("--refresh-eval-case", action="store_true")
     p.add_argument("--data-targets", type=int, default=4)
     p.add_argument("--d-model", type=int, default=96)
     p.add_argument("--heads", type=int, default=4)
@@ -359,10 +785,37 @@ def main() -> None:
     p.add_argument("--components", type=int, default=8)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--latent-weight", type=float, default=2.0)
+    p.add_argument("--latent-context-prob", type=float, default=0.25)
     p.add_argument("--log-every", type=int, default=100)
+    p.add_argument("--plot-path", default="artifacts/gaussian_toy.png")
+    p.add_argument("--no-plot", action="store_true")
+    p.add_argument("--save-checkpoint", default="")
+    p.add_argument("--load-checkpoint", default="")
+    p.add_argument("--eval-only", action="store_true")
+    p.add_argument("--smoke", action="store_true")
+    p.add_argument("--smoke-seeds", type=int, default=3)
+    p.add_argument("--smoke-steps", type=int, default=150)
     args = p.parse_args()
-    model = train(args)
-    evaluate(model, args)
+    if args.smoke:
+        run_smoke(args)
+        return
+
+    device = torch.device(args.device)
+    if args.load_checkpoint:
+        model = load_checkpoint(args.load_checkpoint, device)
+    elif args.eval_only:
+        raise SystemExit("--eval-only requires --load-checkpoint")
+    else:
+        model = None
+
+    if not args.eval_only:
+        model = train(args, model)
+    assert model is not None
+    diag = evaluate(model, args)
+    if args.save_checkpoint:
+        save_checkpoint(model, args.save_checkpoint, args)
+    if not args.no_plot and args.plot_path:
+        plot_diagnostic(diag, args.plot_path)
 
 
 if __name__ == "__main__":

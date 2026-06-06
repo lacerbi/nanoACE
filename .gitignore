@@ -1,6 +1,7 @@
 temp/
 .venv/
 __pycache__/
+artifacts/
 *.py[cod]
 
 # editor / OS cruft

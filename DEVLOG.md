@@ -9,6 +9,44 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-06 — First working Gaussian-toy slice
+
+- **Core implementation.** `ace.py` now contains the current source-of-truth
+  implementation: `Variable`, `Tokens`, `Batch`, separated context/target transformer
+  blocks, shared continuous MDN head, shared masked `Kmax` categorical head, prediction
+  object, target NLL loss, and `sample_ar`.
+- **Hero diagnostic.** `demo.py` trains the Gaussian toy online under fixed latent priors,
+  compares ACE marginals to an analytic grid posterior, and includes an autoregressive
+  two-latent joint diagnostic. The Gaussian hero no longer injects random runtime prior
+  tokens: amortizing over arbitrary prior histograms made the small demo much harder than
+  the posterior-learning behavior we want to inspect first. Runtime prior tokens remain
+  in the core ACE representation for later examples. The AR diagnostic averages the two
+  factorizations `p(mu)p(log_sigma|mu)` and `p(log_sigma)p(mu|log_sigma)` in probability
+  space so the displayed joint posterior is not tied to one arbitrary order. The held-out
+  diagnostic intentionally uses a small `--eval-context` and chooses among
+  `--eval-candidates` by analytic posterior correlation and width, because a saturated
+  narrow/factorized posterior is a poor hero artifact. Once chosen, that held-out
+  observation is persisted as `artifacts/gaussian_toy_eval_case.pt` so later plots inspect
+  the same case unless `--refresh-eval-case` is passed. The selector also penalizes cases
+  pinned against the prior boundary; boundary-clipped posteriors are mathematically fine
+  but poor visual diagnostics.
+  The plot includes a posterior predictive panel for a new `y`: the analytic curve is the
+  posterior mixture `sum p(mu, log_sigma | D) Normal(y | mu, sigma)`, not a Gaussian
+  plug-in approximation.
+  Training now mixes in latent-value context cases (`--latent-context-prob`, default
+  `0.25`): one latent is sometimes revealed as a `VALUE` token and the other remains a
+  target. Without that, AR conditional queries are syntactically valid but
+  out-of-distribution for the toy model.
+- **Artifacts are optional and regenerable.** The demo can save a diagnostic plot, a
+  lightweight checkpoint, and the selected held-out eval observation under `artifacts/`,
+  but these are convenience outputs rather than load-bearing repository assets.
+  `--eval-only --load-checkpoint` verifies a saved toy state, and `--smoke` runs a loose
+  multi-seed check.
+- **Environment.** The local `.venv` uses the same stack as the related GP experiments:
+  `torch==2.11.0+cu128`, PyTorch CUDA runtime 12.8, and the RTX 4060 Laptop GPU.
+
+---
+
 ## 2026-06-06 — Initial design
 
 ### Vision
@@ -136,9 +174,10 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   `Kmax`-logit categorical path, masking invalid logits by `cardinality[var_id]`.
   The training loop should not branch on variable type.
 - **Autoregression is a helper, not architecture.** Joint samples come from
-  `sample_ar(model, context, targets, order=None)`, which repeatedly predicts one target,
+  `sample_ar(model, batch, order=None)`, which repeatedly predicts one target,
   samples it, appends it to context as a `VALUE` token, and continues. The base model stays
-  a diagonal prediction map.
+  a diagonal prediction map. With `order=None`, the helper randomizes target order by
+  default; pass an explicit order for deterministic probes.
 - **Continuous head is shared.** Use one shared MDN head for all continuous variables;
   `var_id` / variable embeddings tell the model which scalar is being predicted. Do not
   add per-variable continuous heads unless a concrete task shows shared capacity is the
@@ -171,14 +210,14 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 - **Restrict priors to latents initially.** ACE's useful runtime-prior story is about
   task-relevant latent variables. Do not generalize prior tokens to arbitrary data values
   until there is a concrete example that needs it.
-- **Let the Gaussian toy be the first correctness oracle.** It should check that prior
-  injection, posterior moments, and autoregressive two-latent predictions are sane before
-  GP-1D adds Cholesky and dataset plumbing.
+- **Let the Gaussian toy be the first correctness oracle.** It should check that posterior
+  moments and autoregressive two-latent predictions are sane before GP-1D adds Cholesky
+  and dataset plumbing.
 - **Mine `temp/` selectively.** Reuse ideas, not structure: rectangular attention, CPU
   float64 GP sampling, and simple train-loop habits are useful; cache provenance, Slurm,
   prefetch, reeval schemas, and diagnostic suites are explicitly out of scope.
-- **Smoke tests stay loose.** The Gaussian toy oracle should catch broken prior injection,
-  broken heads, and obviously wrong posterior moments, but it should not become a brittle
+- **Smoke tests stay loose.** The Gaussian toy oracle should catch broken heads and
+  obviously wrong posterior moments, but it should not become a brittle
   strict-quality gate around stochastic training.
 - **Checkpoint artifact deferred.** A tiny toy `state_dict` can ship only after the toy
   trains reliably and the blob is genuinely small. Design the code so retraining is the
@@ -226,9 +265,9 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ### Examples / scope
 
-- **Hero example 1 — Gaussian (μ, σ) toy.** Two latents, runtime prior injection,
-  analytic Bayesian posterior on a grid → self-verifying. Trains in seconds on CPU.
-  Runs **online, inline, no disk** (it's the "clone and run it" artifact).
+- **Hero example 1 — Gaussian (μ, σ) toy.** Two latents, fixed latent priors,
+  analytic Bayesian posterior on a grid → self-verifying. Runs online and remains small;
+  longer local runs can save a checkpoint/plot for inspection.
   - **A shipped pretrained model is likely** — so `demo.py` can run without a training
     wait, and as a regression anchor — but *how* we distribute it is deferred (not
     fossilizing). See Open questions.
@@ -243,10 +282,10 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ### Layout
 
-- `ace.py`   — config → embedder → block → forward → heads → loss   (~400 lines, THE file)
-- `data.py`  — generators + save/load (sharded)                      (~200)
-- `train.py` — loop + resume                                          (~150)
-- `demo.py`  — Gaussian-toy hero + posterior diagnostic              (~100)
+- `ace.py`   — config → embedder → block → forward → heads → loss   (THE file)
+- `data.py`  — generators + save/load (sharded)
+- `train.py` — loop + resume
+- `demo.py`  — Gaussian-toy hero + posterior diagnostic
 - Dependencies: **torch only** in the core; matplotlib only in `demo.py`. Match the local
   working stack from the GP experiments unless there is a specific reason to change it:
   `torch==2.11.0+cu128` via `https://download.pytorch.org/whl/cu128` on the RTX 4060
