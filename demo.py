@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import math
-from copy import copy
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -13,6 +12,9 @@ from ace import ACE, ACEConfig, Batch, Tokens, Variable, cat_tokens, QUERY, VALU
 
 MU_RANGE = (-1.5, 1.5)
 LOGSIG_RANGE = (math.log(0.15), math.log(1.25))
+EVAL_Y = (0.6780859231948853, 0.852228581905365, 2.016355037689209)
+EVAL_TRUE_MU = 0.891850471496582
+EVAL_TRUE_LOGSIG = -0.4232509136199951
 
 
 @dataclass
@@ -21,8 +23,6 @@ class ToyBatch:
 
     batch: Batch
     y_context: torch.Tensor
-    prior_mu: torch.Tensor
-    prior_logsig: torch.Tensor
     mu: torch.Tensor
     log_sigma: torch.Tensor
 
@@ -66,19 +66,6 @@ def fixed_prior(
     """Uniform latent prior used by the Gaussian toy oracle and sampler."""
 
     return torch.full((batch, bins), 1.0 / bins, device=device)
-
-
-def sample_from_hist(
-    probs: torch.Tensor,
-    value_range: tuple[float, float],
-) -> torch.Tensor:
-    """Draw a scalar from a normalized histogram over `value_range`."""
-
-    lo, hi = value_range
-    bins = probs.shape[-1]
-    idx = torch.distributions.Categorical(probs=probs).sample()
-    u = torch.rand_like(idx, dtype=probs.dtype)
-    return lo + (idx.to(probs.dtype) + u) * ((hi - lo) / bins)
 
 
 def make_tokens(
@@ -128,10 +115,8 @@ def sample_toy_batch(
     conditioning is in-distribution.
     """
 
-    prior_mu = fixed_prior(batch_size, bins, device=device)
-    prior_logsig = fixed_prior(batch_size, bins, device=device)
-    mu = sample_from_hist(prior_mu, MU_RANGE)
-    log_sigma = sample_from_hist(prior_logsig, LOGSIG_RANGE)
+    mu = torch.empty(batch_size, device=device).uniform_(*MU_RANGE)
+    log_sigma = torch.empty(batch_size, device=device).uniform_(*LOGSIG_RANGE)
     sigma = log_sigma.exp()
 
     total_y = max_context + data_targets
@@ -190,7 +175,7 @@ def sample_toy_batch(
         mask=tgt_mask,
         x_dim=1,
     )
-    return ToyBatch(Batch(vars_, context, target), y[:, :max_context], prior_mu, prior_logsig, mu, log_sigma)
+    return ToyBatch(Batch(vars_, context, target), y[:, :max_context], mu, log_sigma)
 
 
 def _repeat_tokens(tokens: Tokens, repeats: int) -> Tokens:
@@ -328,8 +313,6 @@ def ar_joint_log_density(
 
 def analytic_posterior(
     y_obs: torch.Tensor,
-    prior_mu: torch.Tensor,
-    prior_logsig: torch.Tensor,
     *,
     bins: int,
 ) -> dict[str, torch.Tensor]:
@@ -344,6 +327,8 @@ def analytic_posterior(
     device = y_obs.device
     mu_grid = torch.linspace(MU_RANGE[0], MU_RANGE[1], bins, device=device)
     logsig_grid = torch.linspace(LOGSIG_RANGE[0], LOGSIG_RANGE[1], bins, device=device)
+    prior_mu = fixed_prior(1, bins, device=device)[0]
+    prior_logsig = fixed_prior(1, bins, device=device)[0]
     sigma_grid = logsig_grid.exp()
     y = y_obs[None, None, :]
     mu = mu_grid[:, None, None]
@@ -486,128 +471,31 @@ def train(args: argparse.Namespace, model: ACE | None = None) -> ACE:
     return model
 
 
-def eval_problem_score(oracle: dict[str, torch.Tensor]) -> torch.Tensor:
-    """Rank candidate eval problems by visible posterior ambiguity.
+def fixed_eval_batch(vars_: list[Variable], *, bins: int, device: torch.device | str) -> ToyBatch:
+    """The fixed three-observation problem used by the diagnostic plot."""
 
-    Correlation alone can pick a nearly collapsed posterior. The width factor
-    prefers examples whose joint posterior still has enough spread to show up in
-    the diagnostic image. The margin factor avoids cases pinned against a prior
-    boundary, which are correct but make poor visual diagnostics.
-    """
+    y_obs = torch.tensor(EVAL_Y, device=device)
+    mu = torch.tensor([EVAL_TRUE_MU], device=device)
+    log_sigma = torch.tensor([EVAL_TRUE_LOGSIG], device=device)
+    n = y_obs.numel()
 
-    width = (oracle["mu_std"] * oracle["logsig_std"]).sqrt()
-    mu_margin = torch.minimum(
-        oracle["mu_mean"] - MU_RANGE[0],
-        torch.as_tensor(MU_RANGE[1], device=oracle["mu_mean"].device) - oracle["mu_mean"],
-    ) / (MU_RANGE[1] - MU_RANGE[0])
-    logsig_margin = torch.minimum(
-        oracle["logsig_mean"] - LOGSIG_RANGE[0],
-        torch.as_tensor(LOGSIG_RANGE[1], device=oracle["logsig_mean"].device) - oracle["logsig_mean"],
-    ) / (LOGSIG_RANGE[1] - LOGSIG_RANGE[0])
-    margin = (mu_margin.clamp(0.0, 0.25) / 0.25) * (logsig_margin.clamp(0.0, 0.25) / 0.25)
-    return oracle["corr"].abs() * width * margin
-
-
-def select_eval_problem(
-    vars_: list[Variable],
-    *,
-    eval_context: int,
-    candidates: int,
-    bins: int,
-    device: torch.device | str,
-) -> tuple[ToyBatch, dict[str, torch.Tensor]]:
-    """Choose a low-context problem with an analytically coupled posterior."""
-
-    best_score = float("-inf")
-    best: tuple[ToyBatch, dict[str, torch.Tensor]] | None = None
-    for _ in range(candidates):
-        toy = sample_toy_batch(
-            vars_,
-            batch_size=1,
-            max_context=eval_context,
-            min_context=eval_context,
-            data_targets=0,
-            bins=bins,
-            device=device,
-        )
-        y_obs = toy.y_context[0, :eval_context]
-        oracle = analytic_posterior(y_obs, toy.prior_mu[0], toy.prior_logsig[0], bins=bins)
-        score = float(eval_problem_score(oracle))
-        if score > best_score:
-            best_score = score
-            best = (toy, oracle)
-    assert best is not None
-    return best
-
-
-def save_eval_case(toy: ToyBatch, path: str | Path, *, bins: int) -> None:
-    """Persist the small held-out observation used for the diagnostic plot."""
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    y_tokens = (toy.batch.context.var_id == 0) & toy.batch.context.mask
-    n = int(y_tokens[0].sum().item())
-    torch.save(
-        {
-            "version": 2,
-            "bins": bins,
-            "y_context": toy.y_context[0, :n].detach().cpu(),
-            "mu": toy.mu[0].detach().cpu(),
-            "log_sigma": toy.log_sigma[0].detach().cpu(),
-        },
-        path,
-    )
-    print(f"saved eval case: {path}")
-
-
-def load_eval_case(vars_: list[Variable], path: str | Path, *, bins: int, device: torch.device | str) -> ToyBatch:
-    """Load a persisted held-out observation and reconstruct ACE tokens."""
-
-    payload = torch.load(path, map_location=device, weights_only=False)
-    if int(payload["bins"]) != bins:
-        raise ValueError(f"eval case has {payload['bins']} bins, model expects {bins}")
-
-    y_obs = payload["y_context"].to(device)
-    prior_mu = fixed_prior(1, bins, device=device)[0]
-    prior_logsig = fixed_prior(1, bins, device=device)[0]
-    mu = payload["mu"].reshape(1).to(device)
-    log_sigma = payload["log_sigma"].reshape(1).to(device)
-    n = int(y_obs.numel())
-
-    ctx_t = n
-    ctx_var = torch.zeros(1, ctx_t, device=device, dtype=torch.long)
-    ctx_value = torch.zeros(1, ctx_t, device=device)
-    ctx_value[:, :n] = y_obs[None, :]
-    ctx_prior = torch.zeros(1, ctx_t, bins, device=device)
-    ctx_mode = torch.full((1, ctx_t), VALUE, device=device)
-    ctx_mask = torch.ones(1, ctx_t, device=device, dtype=torch.bool)
     context = make_tokens(
-        var_id=ctx_var,
-        value=ctx_value,
-        prior=ctx_prior,
-        mode=ctx_mode,
-        mask=ctx_mask,
+        var_id=torch.zeros(1, n, device=device, dtype=torch.long),
+        value=y_obs[None, :],
+        prior=torch.zeros(1, n, bins, device=device),
+        mode=torch.full((1, n), VALUE, device=device),
+        mask=torch.ones(1, n, device=device, dtype=torch.bool),
         x_dim=1,
     )
-
-    tgt_var = torch.tensor([[1, 2]], device=device)
-    tgt_value = torch.stack([mu, log_sigma], dim=1)
     target = make_tokens(
-        var_id=tgt_var,
-        value=tgt_value,
+        var_id=torch.tensor([[1, 2]], device=device),
+        value=torch.stack([mu, log_sigma], dim=1),
         prior=torch.zeros(1, 2, bins, device=device),
         mode=torch.full((1, 2), QUERY, device=device),
         mask=torch.ones(1, 2, device=device, dtype=torch.bool),
         x_dim=1,
     )
-    return ToyBatch(
-        Batch(vars_, context, target),
-        y_obs[None, :],
-        prior_mu[None, :],
-        prior_logsig[None, :],
-        mu,
-        log_sigma,
-    )
+    return ToyBatch(Batch(vars_, context, target), y_obs[None, :], mu, log_sigma)
 
 
 @torch.no_grad()
@@ -617,25 +505,8 @@ def evaluate(model: ACE, args: argparse.Namespace) -> Diagnostic:
     device = next(model.parameters()).device
     vars_ = model.variables
     bins = model.cfg.prior_bins
-    torch.manual_seed(args.seed + 10_000)
-    eval_context = max(1, args.eval_context)
-    eval_candidates = max(1, args.eval_candidates)
-    eval_case_path = Path(args.eval_case_path) if args.eval_case_path else None
-    if eval_case_path is not None and eval_case_path.exists() and not args.refresh_eval_case:
-        toy = load_eval_case(vars_, eval_case_path, bins=bins, device=device)
-        true = analytic_posterior(toy.y_context[0], toy.prior_mu[0], toy.prior_logsig[0], bins=bins)
-        eval_source = f"saved case {eval_case_path}"
-    else:
-        toy, true = select_eval_problem(
-            vars_,
-            eval_context=eval_context,
-            candidates=eval_candidates,
-            bins=bins,
-            device=device,
-        )
-        eval_source = f"{eval_candidates} candidates"
-        if eval_case_path is not None:
-            save_eval_case(toy, eval_case_path, bins=bins)
+    toy = fixed_eval_batch(vars_, bins=bins, device=device)
+    true = analytic_posterior(toy.y_context[0], bins=bins)
     eval_context = int(toy.y_context.shape[1])
     mu_grid = true["mu_grid"]
     logsig_grid = true["logsig_grid"]
@@ -663,7 +534,7 @@ def evaluate(model: ACE, args: argparse.Namespace) -> Diagnostic:
         "oracle_corr": float(true["corr"]),
     }
     print("\nHeld-out Gaussian toy posterior moments")
-    print(f"eval context    {eval_context} observations from {eval_source}")
+    print(f"eval context    fixed {eval_context}-observation case")
     print(f"truth mu        {float(toy.mu[0]): .3f}")
     print(f"truth sigma     {float(toy.log_sigma[0].exp()): .3f}")
     print(f"oracle corr     {float(true['corr']): .3f}")
@@ -743,27 +614,6 @@ def plot_diagnostic(diag: Diagnostic, path: str | Path) -> None:
     print(f"saved diagnostic plot: {path}")
 
 
-def run_smoke(args: argparse.Namespace) -> None:
-    """Loose multi-seed smoke check for the Gaussian toy."""
-
-    rows = []
-    for seed in range(args.smoke_seeds):
-        a = copy(args)
-        a.seed = seed
-        a.steps = args.smoke_steps
-        a.plot_path = ""
-        print(f"\n[smoke seed {seed}]")
-        model = train(a)
-        diag = evaluate(model, a)
-        rows.append(diag.metrics)
-    mean_mu = sum(r["mu_mean_abs_err"] for r in rows) / len(rows)
-    mean_s = sum(r["logsig_mean_abs_err"] for r in rows) / len(rows)
-    print("\nSmoke summary")
-    print(f"seeds: {args.smoke_seeds}")
-    print(f"mean abs error, mu posterior mean:       {mean_mu:.3f}")
-    print(f"mean abs error, log_sigma posterior mean:{mean_s:.3f}")
-
-
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--steps", type=int, default=500)
@@ -773,10 +623,6 @@ def main() -> None:
     p.add_argument("--bins", type=int, default=64)
     p.add_argument("--max-context", type=int, default=16)
     p.add_argument("--min-context", type=int, default=2)
-    p.add_argument("--eval-context", type=int, default=3)
-    p.add_argument("--eval-candidates", type=int, default=64)
-    p.add_argument("--eval-case-path", default="artifacts/gaussian_toy_eval_case.pt")
-    p.add_argument("--refresh-eval-case", action="store_true")
     p.add_argument("--data-targets", type=int, default=4)
     p.add_argument("--d-model", type=int, default=96)
     p.add_argument("--heads", type=int, default=4)
@@ -792,13 +638,7 @@ def main() -> None:
     p.add_argument("--save-checkpoint", default="")
     p.add_argument("--load-checkpoint", default="")
     p.add_argument("--eval-only", action="store_true")
-    p.add_argument("--smoke", action="store_true")
-    p.add_argument("--smoke-seeds", type=int, default=3)
-    p.add_argument("--smoke-steps", type=int, default=150)
     args = p.parse_args()
-    if args.smoke:
-        run_smoke(args)
-        return
 
     device = torch.device(args.device)
     if args.load_checkpoint:

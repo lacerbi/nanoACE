@@ -23,13 +23,8 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   in the core ACE representation for later examples. The AR diagnostic averages the two
   factorizations `p(mu)p(log_sigma|mu)` and `p(log_sigma)p(mu|log_sigma)` in probability
   space so the displayed joint posterior is not tied to one arbitrary order. The held-out
-  diagnostic intentionally uses a small `--eval-context` and chooses among
-  `--eval-candidates` by analytic posterior correlation and width, because a saturated
-  narrow/factorized posterior is a poor hero artifact. Once chosen, that held-out
-  observation is persisted as `artifacts/gaussian_toy_eval_case.pt` so later plots inspect
-  the same case unless `--refresh-eval-case` is passed. The selector also penalizes cases
-  pinned against the prior boundary; boundary-clipped posteriors are mathematically fine
-  but poor visual diagnostics.
+  diagnostic uses one fixed three-observation case defined directly in `demo.py`; no
+  runtime candidate selection, scoring, or eval-case artifact is needed.
   The plot includes a posterior predictive panel for a new `y`: the analytic curve is the
   posterior mixture `sum p(mu, log_sigma | D) Normal(y | mu, sigma)`, not a Gaussian
   plug-in approximation.
@@ -37,11 +32,10 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   `0.25`): one latent is sometimes revealed as a `VALUE` token and the other remains a
   target. Without that, AR conditional queries are syntactically valid but
   out-of-distribution for the toy model.
-- **Artifacts are optional and regenerable.** The demo can save a diagnostic plot, a
-  lightweight checkpoint, and the selected held-out eval observation under `artifacts/`,
-  but these are convenience outputs rather than load-bearing repository assets.
-  `--eval-only --load-checkpoint` verifies a saved toy state, and `--smoke` runs a loose
-  multi-seed check.
+- **Artifacts are optional and regenerable.** The demo can save a diagnostic plot and a
+  lightweight checkpoint under `artifacts/`, but these are convenience outputs rather
+  than load-bearing repository assets. `--eval-only --load-checkpoint` verifies a saved
+  toy state.
 - **Environment.** The local `.venv` uses the same stack as the related GP experiments:
   `torch==2.11.0+cu128`, PyTorch CUDA runtime 12.8, and the RTX 4060 Laptop GPU.
 
