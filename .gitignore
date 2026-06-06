@@ -1,0 +1,10 @@
+temp/
+.venv/
+__pycache__/
+*.py[cod]
+
+# editor / OS cruft
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
