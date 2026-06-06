@@ -23,6 +23,10 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 - **Sampler.** GP functions are generated online. Kernel matrices and Cholesky sampling
   run on CPU float64, then sampled tensors move to the selected ACE device. There is no
   sharded data layer yet; add one only when a real GP training run needs saved pools.
+  Function values are not clipped: with `log_outputscale` up to `log(1.0)`, sampled `y`
+  values can naturally leave the loose `[-1, 1]` convention used by the embedders. Treat
+  that as a calibration caveat, not a bug. The default Cholesky jitter is `1e-5`; increase
+  it if clustered x-locations ever make Matern-1/2 or periodic kernel matrices unstable.
 - **Diagnostic.** Unlike the Gaussian toy, GP-1D does not yet compute an exact posterior
   over kernel and hyperparameters. The fixed diagnostic plots a sampled function,
   observed context points, ACE predictive mean/uncertainty, kernel posterior bars, and
@@ -276,8 +280,10 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   functions returning a batch. "Online" means calling the generator inside the training
   loop; it needs no config flag. The boundary is the generator function itself, so
   `train.py` does not need separate online and cached code paths.
-- **Normalization to ~[-1,1] happens in `data.py` at generation.** The model only ever
-  sees normalized values (the embedders/head bias assume this range).
+- **Scaling happens at generation.** Examples should keep values roughly around
+  `[-1,1]`, because the embedders/head bias assume that scale. This is not a hard bound:
+  stochastic observations can have tails outside the range, and calibration issues should
+  be checked before adding clipping or rescaling.
 
 ### Training / ops
 

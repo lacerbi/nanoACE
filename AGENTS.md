@@ -81,8 +81,10 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
 - **One global `prior_bins`.** `ACE.__init__` rejects a `Variable` whose `prior_bins`
   differs from the config; ragged per-variable prior grids are not implemented in this
   version.
-- **Priors attach to latents only**, and values are expected pre-normalized to ~[-1, 1] at
-  generation time — the embedders/heads assume that range.
+- **Priors attach to latents only**, and values should generally be scaled around
+  `[-1, 1]` at generation time. This is a soft convention, not clipping: Gaussian and
+  GP samples can have stochastic tails outside that range, which may matter when reading
+  predictive calibration.
 - **Target tokens may carry truth** in `value`/`value_index` while `mode == QUERY`; the
   embedder ignores it and the loss uses it. For prediction-only calls, pass dummy values
   and simply don't call `.log_prob`.
