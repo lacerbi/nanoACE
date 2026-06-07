@@ -23,7 +23,7 @@ from diagnostics import normalized_moments, query_log_density, repeat_tokens
 KERNELS = ("RBF", "Matern12", "Matern32", "Periodic")
 LOG_LENGTHSCALE_RANGE = (math.log(0.12), math.log(0.80))
 LOG_OUTPUTSCALE_RANGE = (math.log(0.25), math.log(1.00))
-EVAL_KERNEL = 2
+EVAL_KERNEL = 3
 EVAL_LOG_LENGTHSCALE = math.log(0.28)
 EVAL_LOG_OUTPUTSCALE = math.log(0.75)
 EVAL_SEED = 20260606

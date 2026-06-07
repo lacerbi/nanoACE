@@ -131,14 +131,21 @@ scratch. **None is implemented yet; the histogram is still what is in the code.*
   Cholesky jitter used by the sampler. The fixed context locations are irregular and
   clustered, including nearby pairs/triples, because sparse evenly spaced points do not
   say much about local roughness and make kernel/lengthscale inference mostly guesswork.
+- **Oracle grid sanity check.** The fixed GP diagnostic was rerun from the retained
+  checkpoint with `--oracle-bins 32`, `64`, and `96`. Kernel posterior probabilities,
+  latent posterior moments, and predictive RMSE were stable to the printed precision,
+  so the default 64-bin oracle is adequate for this diagnostic. The RBF integrated
+  marginal likelihood delta moves by about 0.1 log units across those grids, but RBF has
+  posterior mass near 0.002 in this case, so that movement is not practically relevant.
+  This is a one-case numerical check, not a benchmark harness.
 - **Current retained GP artifact.** The retained `artifacts/gp1d.pt` / `artifacts/gp1d.png`
-  pair is a 100k-step online run. On the fixed diagnostic, the generating kernel is
-  Matern-3/2, but the numerical oracle gives posterior mass roughly RBF 0.70,
-  Matern-1/2 0.02, Matern-3/2 0.28, periodic 0.00; the checkpoint gives roughly RBF
-  0.74, Matern-1/2 0.02, Matern-3/2 0.24, periodic 0.00. The oracle-vs-ACE kernel KL is
-  about 0.01, and the predictive RMSEs are similar. The current artifact is useful for
-  checking the machinery, but it should not be treated as evidence that the training
-  setup has converged in general.
+  pair is a 100k-step online run. The fixed diagnostic now uses a periodic generating
+  kernel. The numerical oracle still leaves real uncertainty: posterior mass is roughly
+  RBF 0.002, Matern-1/2 0.377, Matern-3/2 0.121, periodic 0.500. The checkpoint gives
+  roughly RBF 0.013, Matern-1/2 0.295, Matern-3/2 0.223, periodic 0.469. The
+  oracle-vs-ACE kernel KL is about 0.05; oracle predictive RMSE is about 0.35 and ACE
+  predictive RMSE is about 0.40. Treat the plot as an oracle-calibrated ambiguous
+  posterior, not as a hard truth-recovery example.
 
 ---
 
