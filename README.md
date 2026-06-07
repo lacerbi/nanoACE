@@ -58,8 +58,9 @@ Implemented modules:
   two-variable AR diagnostics.
 - [playground/](playground/): a **non-core**, fully in-browser TypeScript demo
   (separate toolchain) where trained models run client-side — GP-1D, Gaussian,
-  and SIR, with interactive conditioning, latent/prior controls, and oracle
-  overlays where practical.
+  SIR, and BO-1D, with interactive conditioning, latent/prior controls, and
+  oracle overlays where practical. BO-1D stays no-oracle and overlays
+  optimum-location/value marginals on the editable regression plot.
   See [playground/README.md](playground/README.md). The Python core stays
   torch-only; the playground is an example built on a parity-tested TS port of
   `ace.py`'s forward pass.

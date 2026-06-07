@@ -9,7 +9,7 @@ browser — no server, no backend.
 > The core stays torch-only and legible; this folder carries the JS/TS toolchain.
 > It is a frozen snapshot of the model's forward pass, kept honest by a parity test.
 
-Three demos:
+Four demos:
 
 - **GP-1D regression** — click to add/drag/delete points; watch the posterior
   predictive band, the kernel posterior, and the lengthscale/outputscale
@@ -21,6 +21,9 @@ Three demos:
 - **SIR SBI** — edit infected-fraction observations, set Beta priors over
   `beta` and `gamma`, and compare ACE's posterior/predictive curve against a
   live browser-side numerical SIR grid oracle.
+- **BO-1D** - edit black-box function observations, set or fix priors over
+  `x_opt` and `y_opt`, and inspect the optimum-location/value marginals
+  overlaid on the regression plot. BO intentionally has no oracle.
 
 ## Run locally
 
@@ -33,6 +36,7 @@ then run the dev server:
 python playground/export_weights.py --task gp1d     --checkpoint artifacts/gp1d.pt         --out playground/public/models/gp1d
 python playground/export_weights.py --task gaussian --checkpoint artifacts/gaussian_toy.pt --out playground/public/models/gaussian
 python playground/export_weights.py --task sbi_sir  --checkpoint artifacts/sbi_sir.pt      --out playground/public/models/sbi_sir
+python playground/export_weights.py --task bo1d     --checkpoint artifacts/bo1d.pt         --out playground/public/models/bo1d
 
 cd playground
 npm install
@@ -56,6 +60,7 @@ npm test           # vitest: parity + orchestration + UI smoke tests
 - `src/gp/`, `src/gaussian/`, `src/sir/` — each demo has a pure `infer.ts`
   (DOM-free inference) and a `demo.ts` (UI). `oracle.ts` is the Gaussian analytic
   posterior or SIR numerical grid oracle where applicable.
+  BO lives in `src/bo/` and intentionally has no oracle.
 - `src/config.ts` — all tunable constants (OOD thresholds, view ranges, grid
   sizes) in one place.
 
@@ -68,6 +73,8 @@ latents is now in-distribution for the current multi-reveal checkpoints. For
 GP-1D, a pins-only context with no observed data is still flagged because GP
 training used at least four data context points. SIR flags very sparse
 observation sets because the training sampler used at least four data points.
+BO uses the same point-count/value guardrail style as GP, with prior-only
+contexts flagged because BO training used at least one observed point.
 
 ## Weights (not committed — generate locally)
 
@@ -80,6 +87,7 @@ repo's `artifacts/` (also gitignored). From the project venv at the repo root:
 python playground/export_weights.py --task gp1d     --checkpoint artifacts/gp1d.pt        --out playground/public/models/gp1d
 python playground/export_weights.py --task gaussian --checkpoint artifacts/gaussian_toy.pt --out playground/public/models/gaussian
 python playground/export_weights.py --task sbi_sir  --checkpoint artifacts/sbi_sir.pt      --out playground/public/models/sbi_sir
+python playground/export_weights.py --task bo1d     --checkpoint artifacts/bo1d.pt         --out playground/public/models/bo1d
 ```
 
 ## Parity (the linchpin)

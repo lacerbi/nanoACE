@@ -25,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import ace  # noqa: E402
 import diagnostics  # noqa: E402
+import bo1d  # noqa: E402
 import gaussian_toy  # noqa: E402
 import gp1d  # noqa: E402
 import sbi_sir  # noqa: E402
@@ -240,6 +241,54 @@ def sir_cases(model) -> list[dict]:
     return cases
 
 
+def bo_cases(model) -> list[dict]:
+    cases = []
+
+    def x_prior_vec(mu_unit, nu):
+        return tuple(bo1d.prior_features(torch.tensor(float(mu_unit)), torch.tensor(float(nu))).tolist())
+
+    def y_prior_vec(mu_unit, nu):
+        return tuple(bo1d.y_opt_prior_features(torch.tensor([float(mu_unit)]), torch.tensor([float(nu)]))[0].tolist())
+
+    # Case 1: finite-spread priors on x_opt/y_opt + observed function values.
+    ctx = TokenBuilder()
+    for x, y in [(-0.8, 0.25), (-0.5, 0.05), (0.1, -0.28), (0.7, 0.2)]:
+        ctx.add(0, VALUE, x=x, value=float(bo1d.scale_y(torch.tensor(y))))
+    ctx.add(1, PRIOR, prior=x_prior_vec(0.70, 25.0))
+    ctx.add(2, PRIOR, prior=y_prior_vec(0.50, 2.0))
+    tgt = TokenBuilder()
+    tgt.add(1, QUERY, value=enc(model, 1, bo1d.EVAL_X_OPT))
+    tgt.add(2, QUERY, value=enc(model, 2, bo1d.EVAL_Y_OPT))
+    tgt.add(0, QUERY, x=0.4, value=float(bo1d.scale_y(torch.tensor(-0.4))))
+    cases.append(run_case(model, "bo_beta_priors", ctx, tgt))
+
+    # Case 2: y_opt fixed as a zero-spread PRIOR; x_opt remains queried.
+    y_int = enc(model, 2, bo1d.EVAL_Y_OPT)
+    ctx = TokenBuilder()
+    for x, y in [(-0.6, 0.18), (0.0, -0.12), (0.65, 0.22)]:
+        ctx.add(0, VALUE, x=x, value=float(bo1d.scale_y(torch.tensor(y))))
+    ctx.add(1, PRIOR, prior=x_prior_vec(0.50, 2.0))
+    ctx.add(2, PRIOR, value=y_int, prior=(y_int, 0.0))
+    tgt = TokenBuilder()
+    tgt.add(1, QUERY, value=enc(model, 1, 0.25))
+    tgt.add(0, QUERY, x=0.25, value=float(bo1d.scale_y(torch.tensor(-0.2))))
+    cases.append(run_case(model, "bo_known_y_opt", ctx, tgt))
+
+    # Case 3: padded data context plus active priors.
+    ctx = TokenBuilder()
+    ctx.add(0, VALUE, x=-0.4, value=float(bo1d.scale_y(torch.tensor(0.1))))
+    ctx.add(0, VALUE, x=0.0, value=0.0, mask=False)
+    ctx.add(0, VALUE, x=0.3, value=float(bo1d.scale_y(torch.tensor(-0.25))))
+    ctx.add(1, PRIOR, prior=x_prior_vec(0.50, 2.0))
+    ctx.add(2, PRIOR, prior=y_prior_vec(0.50, 2.0))
+    tgt = TokenBuilder()
+    tgt.add(2, QUERY, value=enc(model, 2, -0.5))
+    tgt.add(0, QUERY, x=0.1, value=float(bo1d.scale_y(torch.tensor(0.0))))
+    cases.append(run_case(model, "bo_padded_context", ctx, tgt))
+
+    return cases
+
+
 @torch.no_grad()
 def gp_demo_reference(model) -> dict:
     """End-to-end reference for the GP demo's orchestration, using gp1d.py's own
@@ -393,6 +442,48 @@ def sir_demo_reference(model) -> dict:
     }
 
 
+@torch.no_grad()
+def bo_demo_reference(model) -> dict:
+    """End-to-end reference for the BO demo's playground orchestration.
+
+    There is deliberately no oracle here: this fixture only checks that the TS
+    token construction and forward pass reproduce bo1d.py on the fixed case.
+    """
+
+    device = next(model.parameters()).device
+    bins = 80
+    points = 161
+    toy = bo1d.fixed_eval_batch(model.variables, device=device, points=points, prior_kind="uniform", jitter=1e-5)
+
+    pred = model(toy.batch)
+    y_mean = bo1d.unscale_y(pred.mean(toy.batch.target)[0])
+    y_std = pred.continuous_var()[0].clamp_min(1e-8).sqrt() * (0.5 * (bo1d.Y_RANGE[1] - bo1d.Y_RANGE[0]))
+
+    x_grid = torch.linspace(bo1d.X_OPT_RANGE[0], bo1d.X_OPT_RANGE[1], bins, device=device)
+    y_grid = torch.linspace(bo1d.Y_OPT_RANGE[0], bo1d.Y_OPT_RANGE[1], bins, device=device)
+    x_logp = diagnostics.query_log_density(model, toy.batch, 1, encode_value(model.variables[1], x_grid))
+    y_logp = diagnostics.query_log_density(model, toy.batch, 2, encode_value(model.variables[2], y_grid))
+
+    def norm(logp):
+        return (logp - torch.logsumexp(logp, dim=0)).exp().tolist()
+
+    return {
+        "x_context": toy.x_context[0].tolist(),
+        "y_context": toy.y_context[0].tolist(),
+        "x_prior_unit": float(toy.x_opt_prior_unit[0]),
+        "x_prior_nu": float(toy.x_opt_prior_nu[0]),
+        "y_prior_unit": float(toy.y_opt_prior_unit[0]),
+        "y_prior_nu": float(toy.y_opt_prior_nu[0]),
+        "band_x": toy.x_target[0].tolist(),
+        "band_mean": y_mean.tolist(),
+        "band_std": y_std.tolist(),
+        "x_grid": x_grid.tolist(),
+        "x_post": norm(x_logp),
+        "y_grid": y_grid.tolist(),
+        "y_post": norm(y_logp),
+    }
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     device = torch.device("cpu")
@@ -423,6 +514,15 @@ def main() -> None:
     print(f"wrote sbi_sir.parity.json ({len(sir)} cases)")
     (OUT_DIR / "sbi_sir.demo.json").write_text(json.dumps(sir_demo_reference(sir_model)))
     print("wrote sbi_sir.demo.json")
+
+    bo_model = bo1d.load_checkpoint(str(REPO_ROOT / "artifacts" / "bo1d.pt"), device)
+    bo_model.eval()
+    quantize_fp16_inplace(bo_model)  # match the shipped fp16 weights
+    bo = bo_cases(bo_model)
+    (OUT_DIR / "bo1d.parity.json").write_text(json.dumps(bo))
+    print(f"wrote bo1d.parity.json ({len(bo)} cases)")
+    (OUT_DIR / "bo1d.demo.json").write_text(json.dumps(bo_demo_reference(bo_model)))
+    print("wrote bo1d.demo.json")
 
 
 if __name__ == "__main__":

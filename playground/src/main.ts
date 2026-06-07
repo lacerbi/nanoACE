@@ -21,6 +21,7 @@ async function mount(): Promise<void> {
   const gpEl = document.getElementById("gp");
   const gaussianEl = document.getElementById("gaussian");
   const sirEl = document.getElementById("sir");
+  const boEl = document.getElementById("bo");
   if (gpEl) {
     try {
       const { mountGP } = await import("./gp/demo");
@@ -43,6 +44,14 @@ async function mount(): Promise<void> {
       await mountSIR(sirEl);
     } catch (err) {
       sirEl.innerHTML = `<p class="loading">Failed to load SIR demo: ${String(err)}</p>`;
+    }
+  }
+  if (boEl) {
+    try {
+      const { mountBO } = await import("./bo/demo");
+      await mountBO(boEl);
+    } catch (err) {
+      boEl.innerHTML = `<p class="loading">Failed to load BO demo: ${String(err)}</p>`;
     }
   }
 }

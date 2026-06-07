@@ -9,6 +9,7 @@
  */
 
 import { GP, KERNEL_LABELS } from "../config";
+import { clamp, hitPoint, pointOodReasons } from "../interaction";
 import { makePlot, type Plot } from "../plot";
 import { ACEModel } from "../ace/model";
 import { loadWeights } from "../ace/weights";
@@ -166,29 +167,28 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     pin.scale = pinScale.checked;
     render();
   });
-  root.querySelector<HTMLButtonElement>(".clear")!.addEventListener("click", () => {
-    points.length = 0;
-    render();
-  });
+  root
+    .querySelector<HTMLButtonElement>(".clear")!
+    .addEventListener("click", () => {
+      points.length = 0;
+      render();
+    });
 
   // pointer interaction
   let mainPlot: Plot | null = null;
-  const hitPoint = (px: number, py: number): number | null => {
-    if (!mainPlot) return null;
-    for (let i = 0; i < points.length; i++) {
-      const dx = mainPlot.xPx(points[i].x) - px;
-      const dy = mainPlot.yPx(points[i].y) - py;
-      if (Math.hypot(dx, dy) <= GP.HIT_RADIUS_PX) return i;
-    }
-    return null;
-  };
-  const clampX = (x: number) => Math.min(Math.max(x, GP.X_DOMAIN[0]), GP.X_DOMAIN[1]);
-  const clampY = (y: number) => Math.min(Math.max(y, GP.Y_VIEW[0]), GP.Y_VIEW[1]);
+  const clampX = (x: number) => clamp(x, GP.X_DOMAIN[0], GP.X_DOMAIN[1]);
+  const clampY = (y: number) => clamp(y, GP.Y_VIEW[0], GP.Y_VIEW[1]);
 
   mainCanvas.addEventListener("contextmenu", (e) => e.preventDefault());
   mainCanvas.addEventListener("pointerdown", (e) => {
     if (!mainPlot) return;
-    const hit = hitPoint(e.offsetX, e.offsetY);
+    const hit = hitPoint(
+      points,
+      mainPlot,
+      e.offsetX,
+      e.offsetY,
+      GP.HIT_RADIUS_PX,
+    );
     if (hit !== null && (e.shiftKey || e.button === 2)) {
       points.splice(hit, 1);
       render();
@@ -199,12 +199,18 @@ export async function mountGP(el: HTMLElement): Promise<void> {
       mainCanvas.setPointerCapture(e.pointerId);
       return;
     }
-    points.push({ x: clampX(mainPlot.pxToX(e.offsetX)), y: clampY(mainPlot.pxToY(e.offsetY)) });
+    points.push({
+      x: clampX(mainPlot.pxToX(e.offsetX)),
+      y: clampY(mainPlot.pxToY(e.offsetY)),
+    });
     render();
   });
   mainCanvas.addEventListener("pointermove", (e) => {
     if (dragIdx === null || !mainPlot) return;
-    points[dragIdx] = { x: clampX(mainPlot.pxToX(e.offsetX)), y: clampY(mainPlot.pxToY(e.offsetY)) };
+    points[dragIdx] = {
+      x: clampX(mainPlot.pxToX(e.offsetX)),
+      y: clampY(mainPlot.pxToY(e.offsetY)),
+    };
     render();
   });
   const endDrag = () => {
@@ -215,14 +221,18 @@ export async function mountGP(el: HTMLElement): Promise<void> {
 
   // --- rendering ---
   function oodReasons(): string[] {
-    const reasons: string[] = [];
-    const nFar = points.filter((p) => Math.abs(p.y) > GP.Y_OOD).length;
-    if (nFar > 0) reasons.push(`${nFar} point(s) beyond training y-range (|y| > ${GP.Y_OOD})`);
-    if (points.length > GP.MAX_CONTEXT_HINT)
-      reasons.push(`${points.length} points (training used ≤ ${GP.MAX_CONTEXT_HINT})`);
-    const nPinned = (pin.kernel !== null ? 1 : 0) + (pin.ell ? 1 : 0) + (pin.scale ? 1 : 0);
+    const reasons = pointOodReasons(points, {
+      yIsOod: (y) => Math.abs(y) > GP.Y_OOD,
+      yReason: `beyond training y-range (|y| > ${GP.Y_OOD})`,
+      maxPoints: GP.MAX_CONTEXT_HINT,
+      maxReason: (n) => `${n} points (training used ≤ ${GP.MAX_CONTEXT_HINT})`,
+    });
+    const nPinned =
+      (pin.kernel !== null ? 1 : 0) + (pin.ell ? 1 : 0) + (pin.scale ? 1 : 0);
     if (points.length === 0 && nPinned > 0)
-      reasons.push("latent-only context (training used at least 4 data points)");
+      reasons.push(
+        "latent-only context (training used at least 4 data points)",
+      );
     // Multi-pin is in-distribution since the multi-latent-reveal retrain, so pinning
     // any subset of latents no longer flags OOD.
     return reasons;
@@ -243,7 +253,9 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     updateControls();
     const reasons = oodReasons();
     banner.hidden = reasons.length === 0;
-    banner.textContent = reasons.length ? `⚠ Out of training distribution: ${reasons.join(" · ")}` : "";
+    banner.textContent = reasons.length
+      ? `⚠ Out of training distribution: ${reasons.join(" · ")}`
+      : "";
 
     const spec: GPSpec = {
       points,
@@ -264,9 +276,18 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   }
 
   function baseMain(): Plot {
-    const p = makePlot(mainCanvas, { xDomain: GP.X_DOMAIN, yDomain: GP.Y_VIEW });
+    const p = makePlot(mainCanvas, {
+      xDomain: GP.X_DOMAIN,
+      yDomain: GP.Y_VIEW,
+    });
     p.clear();
-    p.rectData(GP.X_DOMAIN[0], GP.X_DOMAIN[1], GP.Y_NORMAL[0], GP.Y_NORMAL[1], "rgba(37,99,235,0.05)");
+    p.rectData(
+      GP.X_DOMAIN[0],
+      GP.X_DOMAIN[1],
+      GP.Y_NORMAL[0],
+      GP.Y_NORMAL[1],
+      "rgba(37,99,235,0.05)",
+    );
     p.hline(0, "#eceef2", 1);
     return p;
   }
@@ -278,7 +299,11 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "14px system-ui";
     ctx.textAlign = "center";
-    ctx.fillText("Add a point or pin a latent to see predictions.", mainPlot.width / 2, mainPlot.height / 2);
+    ctx.fillText(
+      "Add a point or pin a latent to see predictions.",
+      mainPlot.width / 2,
+      mainPlot.height / 2,
+    );
     ctx.textAlign = "start";
   }
 
@@ -289,12 +314,16 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     mainPlot.band(res.bandX, lo, hi, "rgba(37,99,235,0.16)");
     mainPlot.line(res.bandX, res.bandMean, "#2563eb", 1.8);
     mainPlot.dots(
-      points.filter((p) => Math.abs(p.y) <= GP.Y_OOD).map((p) => [p.x, p.y] as [number, number]),
+      points
+        .filter((p) => Math.abs(p.y) <= GP.Y_OOD)
+        .map((p) => [p.x, p.y] as [number, number]),
       "#111827",
       4,
     );
     mainPlot.dots(
-      points.filter((p) => Math.abs(p.y) > GP.Y_OOD).map((p) => [p.x, p.y] as [number, number]),
+      points
+        .filter((p) => Math.abs(p.y) > GP.Y_OOD)
+        .map((p) => [p.x, p.y] as [number, number]),
       "#b45309",
       4,
     );
@@ -307,7 +336,11 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   }
 
   function drawKernel(probs: number[] | null): void {
-    const p = makePlot(kernelCanvas, { xDomain: [0, 1], yDomain: [0, 1], padding: { l: 8, r: 8, t: 8, b: 28 } });
+    const p = makePlot(kernelCanvas, {
+      xDomain: [0, 1],
+      yDomain: [0, 1],
+      padding: { l: 8, r: 8, t: 8, b: 28 },
+    });
     p.clear();
     const n = KERNEL_LABELS.length;
     const ctx = p.ctx;
@@ -329,7 +362,12 @@ export async function mountGP(el: HTMLElement): Promise<void> {
       ctx.font = "11px system-ui";
       ctx.textAlign = "center";
       ctx.fillText(KERNEL_LABELS[i], x0 + bw / 2, p.height - 12);
-      if (probs) ctx.fillText(prob.toFixed(2), x0 + bw / 2, Math.max(p.height - 32 - barH, 14));
+      if (probs)
+        ctx.fillText(
+          prob.toFixed(2),
+          x0 + bw / 2,
+          Math.max(p.height - 32 - barH, 14),
+        );
     }
     ctx.textAlign = "start";
   }
@@ -337,7 +375,10 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   function drawLatents(res: GPResult): void {
     const xLo = Math.min(ellMeta.bound_lo, scaleMeta.bound_lo);
     const xHi = Math.max(ellMeta.bound_hi, scaleMeta.bound_hi);
-    const p = makePlot(latentCanvas, { xDomain: [xLo, xHi], yDomain: [0, 1.08] });
+    const p = makePlot(latentCanvas, {
+      xDomain: [xLo, xHi],
+      yDomain: [0, 1.08],
+    });
     p.clear();
     p.axes();
     const peak = (arr: number[]) => {
@@ -346,7 +387,8 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     };
     if (res.ellPost) p.line(res.ellGrid, peak(res.ellPost), "#2563eb", 1.8);
     else p.vline(ellVal, "#2563eb", 3);
-    if (res.scalePost) p.line(res.scaleGrid, peak(res.scalePost), "#ea580c", 1.8);
+    if (res.scalePost)
+      p.line(res.scaleGrid, peak(res.scalePost), "#ea580c", 1.8);
     else p.vline(scaleVal, "#ea580c", 3);
     const ctx = p.ctx;
     ctx.font = "11px system-ui";

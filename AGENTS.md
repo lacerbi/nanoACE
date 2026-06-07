@@ -147,7 +147,7 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
 - **`playground/` is a non-core example, not part of the core.** It is a Vite + TypeScript
   in-browser demo that reimplements `ace.py`'s forward pass in TS (parity-tested against
   the PyTorch model) so trained checkpoints run client-side. Current tabs cover GP-1D,
-  Gaussian, and SIR. The core stays torch-only and legible; do not let the JS toolchain or
+  Gaussian, SIR, and BO-1D. The core stays torch-only and legible; do not let the JS toolchain or
   web concerns bleed into `ace.py` or the examples.
   Treat it like `temp/` in spirit (separate, optional), but unlike `temp/` it *is* checked
   in and maintained. See `playground/README.md` and the DEVLOG "Web playground" entry.

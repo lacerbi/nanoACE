@@ -9,6 +9,24 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-07 - BO-1D playground tab
+
+- **BO added to the non-core web playground.** `playground/` now has a fourth tab for
+  `bo1d.py`: editable black-box observations, finite Beta prior tokens for `x_opt` and
+  `y_opt`, optional zero-spread fixed values for either optimum latent, and live ACE
+  predictive bands. The optimum-location marginal is overlaid along the plot's x-axis
+  and the optimum-value marginal along the y-axis, so the BO quantities stay in the same
+  visual frame as the regression surface.
+- **No oracle, consistent with `bo1d.py`.** The tab does not add a browser-side simulator
+  posterior or a BO rollout. It only exposes ACE's amortized predictions and conditioning
+  interface. Verification is parity plus Python-orchestration fixtures, not truth-quality.
+- **Smoke artifact caveat.** `artifacts/bo1d.pt` generated during this wiring pass is a
+  tiny CPU checkpoint used to export browser weights and test the UI. It is not a quality
+  BO model; replace it with a long GPU-trained checkpoint and rerun export + parity
+  together when model quality matters.
+
+---
+
 ## 2026-06-07 — Single shared multi-latent reveal strategy (mixture DGP)
 
 All four examples now decide *how many* latents are revealed as context through one

@@ -13,6 +13,8 @@ Usage (from the project venv):
         --checkpoint artifacts/gaussian_toy.pt --out playground/public/models/gaussian
     python playground/export_weights.py --task sbi_sir \
         --checkpoint artifacts/sbi_sir.pt --out playground/public/models/sbi_sir
+    python playground/export_weights.py --task bo1d \
+        --checkpoint artifacts/bo1d.pt --out playground/public/models/bo1d
 
 Outputs `<out>/manifest.json` and `<out>/weights.bin` (float16, little-endian).
 
@@ -40,7 +42,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Task name -> module providing load_checkpoint(path, device) and variables().
-TASK_MODULES = {"gp1d": "gp1d", "gaussian": "gaussian_toy", "sbi_sir": "sbi_sir"}
+TASK_MODULES = {"gp1d": "gp1d", "gaussian": "gaussian_toy", "sbi_sir": "sbi_sir", "bo1d": "bo1d"}
 
 
 def quantize_fp16_inplace(model) -> None:

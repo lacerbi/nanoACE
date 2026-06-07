@@ -93,6 +93,7 @@ const TASKS = [
   { dir: "gp1d", file: "gp1d.parity.json" },
   { dir: "gaussian", file: "gaussian.parity.json" },
   { dir: "sbi_sir", file: "sbi_sir.parity.json" },
+  { dir: "bo1d", file: "bo1d.parity.json" },
 ];
 
 for (const task of TASKS) {

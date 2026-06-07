@@ -41,5 +41,20 @@ export const SIR = {
   HIT_RADIUS_PX: 12,
 };
 
+export const BO = {
+  X_DOMAIN: [-1, 1] as [number, number],
+  Y_RANGE: [-1, 2] as [number, number], // bo1d.Y_RANGE: data-y scaling and y_opt latent bounds
+  Y_OPT_RANGE: [-1, 0] as [number, number], // bo1d.Y_OPT_RANGE: prior support for optimum value
+  Y_VIEW: [-1.35, 2.45] as [number, number],
+  Y_NORMAL: [-1, 2] as [number, number],
+  Y_OOD: [-1.15, 2.25] as [number, number],
+  MAX_CONTEXT_HINT: 12,
+  MIN_CONTEXT_HINT: 1,
+  BAND_POINTS: 161,
+  LATENT_GRID: 80,
+  NU_RANGE: [2, 1000] as [number, number],
+  HIT_RADIUS_PX: 12,
+};
+
 // Display labels for the discrete kernel latent (order matches gp1d.KERNELS).
 export const KERNEL_LABELS = ["RBF", "Matérn-½", "Matérn-3/2", "Periodic"];
