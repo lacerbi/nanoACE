@@ -9,6 +9,68 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-07 — 1D Bayesian optimization example (planned)
+
+Full design in [PLAN-bo1d.md](PLAN-bo1d.md). Status: planned, not yet built.
+
+- **Fourth example: `bo1d.py`.** 1D Bayesian optimization. The two latents are the
+  global optimum's **location** `x_opt` and **value** `y_opt`. The headline is that
+  ACE amortizes `p(x_opt | D)` and `p(y_opt | D)` directly (normally intractable,
+  the reason BO needs bespoke acquisition machinery) and accepts a runtime Beta
+  prior over the optimum location (the paper's πBO / ACEP-TS). It is a mix:
+  GP function sampling + sampled kernel/hyperparameters from `gp1d.py`, ACEP Beta
+  prior tokens + the reveal mechanism from the prior-conditioning examples, and a
+  new optimum-planting DGP. Both latents are bounded continuous and reuse the
+  existing PRIOR-token path, so there is **no new `ace.py` machinery**.
+- **Latents are instance properties, not class properties.** Unlike `gp1d.py`
+  (kernel/hyperparameters describe the function *class*), `x_opt`/`y_opt` describe
+  the *specific sampled function*. This is the paper's BO headline and what makes
+  `p(x_opt | D)` worth amortizing. The kernel/lengthscale/outputscale are sampled
+  **nuisance**, not predicted -- `gp1d.py` already covers the discrete/kernel path,
+  so a kernel latent here would be redundant.
+- **Full DGP, faithful to Appendix C.3.1.** Sample hyperparameters; draw `x_opt`
+  from the (contaminated) prior; draw the natural optimum depth `d` from the
+  min-value distribution (min of `~2/ℓ` Gaussian draws, with `p=0.1` an extra
+  `Exp(1)` "unexpectedly low" kick); sample a GP draw conditioned on the optimum
+  geometry `g(x_opt)=d`; then fold+envelope
+  `f(x) = |g(x) − d| + (1/5)(x − x_opt)² + y_opt`, which makes `x_opt` the exact
+  unique global minimum with value `y_opt`. The min-value machinery shapes the
+  *local geometry/depth*; **our prior is the leveling shift `y_opt`**, replacing
+  the paper's final `U[-5, 5]` offset. This corrects an earlier mistaken plan to
+  drop the min-value/`Exp(1)` tricks: they stay (they shape the function); the
+  prior only sets the absolute level.
+- **No grid oracle.** The `|·|` fold destroys Gaussianity, so unlike the other
+  three examples there is no closed-form posterior. Verification is qualitative:
+  short run + a token-scale histogram check + a fixed diagnostic that plots the
+  true function, marks true `(x_opt, y_opt)`, and shows ACE's marginals
+  concentrating near truth. This is a deliberate break from the "every example has
+  a grid oracle" convention, recorded here and in `AGENTS.md`.
+- **ε-contamination ("robust prior").** The effective generative prior is
+  `(1−ε)·Beta + ε·Uniform` (ε≈0.1, a classic robust-Bayes / ε-contamination
+  prior), applied to both latents. The token still encodes only the raw `Beta`;
+  because ε is a fixed global constant the model learns to discount every injected
+  prior automatically, so a confidently *wrong* user prior is overridden by the
+  data. This lives entirely in the DGP truth-sampling (and plot overlays), not in
+  the token or model -- a single Beta token cannot represent a mixture, and it does
+  not need to. New `ace_prior.py` helpers: `sample_contaminated`,
+  `mixture_logprior_on_grid`. The diagnostic makes this visible with three prior
+  columns: uniform / correct-informative / **wrong-informative**.
+- **Scaling is the real work.** `y_opt` and data `y` are the same physical quantity
+  (function values), so they share one affine: `Y_RANGE` is the full native y
+  range and serves both as the `y_opt` latent `bounds` and as the data-`y` scaling,
+  so the model sees both on one ruler and `y_opt ≤ all y` is legible. `σ_f` is
+  tamed (provisionally `U(0.1, 0.5)`) so the bump above the optimum stays near the
+  `[-1, 1]` convention. All scale numbers are provisional and expected to change
+  after the first histogram check.
+- **No BO loop.** No iterative acquisition rollout; the conditional
+  `p(x_opt | y_opt = v, D)` is shown to gesture at Thompson sampling, nothing more.
+- **Scope note.** This is example #4; "nano ships exactly two" (initial design) is
+  already stretched by SIR. BO earns its place: it adds instance-level latents, the
+  optimum-posterior headline, and the robust prior-injection mechanism, none of
+  which the other examples cover. Recorded as a deliberate decision.
+
+---
+
 ## 2026-06-07 — SIR simulation-based-inference example + `ace_prior.py`
 
 - **Third example: `sbi_sir.py`.** This is the SBI task from the paper's third
