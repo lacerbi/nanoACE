@@ -32,6 +32,16 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   `gaussian_toy.py`). PyTorch-float32 vs JS-float64 means the gate is a combined
   relative+absolute tolerance, not bit-parity. If `ace.py`'s forward changes, the
   parity test fails loudly and localizes the drift; re-port and regenerate.
+- **Gotcha — fixtures + blob can go collectively stale vs the checkpoint.** Both
+  `export_weights.py` and `parity.py` derive from the checkpoint loaded at run time,
+  and the parity test compares the TS forward only against those fixtures — *not*
+  against the current checkpoint. So if the checkpoint is retrained but the blob and
+  fixtures aren't regenerated together, the demo silently loads the old model while
+  `npm test` stays green. (This happened 2026-06-07: a GP retrain at 12:52 — after a
+  12:49 export — left the demo predicting a flat mean from a stale blob; the fix was
+  to re-run export + parity.) **Always re-run `export_weights.py` and `parity.py`
+  together after retraining**; a Python sanity assert on the freshly exported model
+  (e.g. it tracks a smooth function) would catch this class of bug.
 - **Weight hosting is an open decision; blobs are not committed (parked).** The
   exported fp16 blobs (`playground/public/models/`) are gitignored for now.
   Options: commit them (~3.6 MB today, but binary churn grows with retrains and
@@ -40,15 +50,29 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   risks the fetched weights drifting out of sync with the parity-pinned code, the
   one integrity property this design leans on). Regenerate locally via
   `export_weights.py` meanwhile. The Pages deploy is blocked until this resolves.
-- **TODO — retrain for multi-latent reveal (multi-pin is currently OOD).** Both
-  samplers reveal *at most one* latent as context per example (`reveal_which` in
-  `gp1d`, `reveal_mu` xor `reveal_logsig` in `gaussian_toy`). The playground lets
-  users pin two or three latents at once, which is therefore out of distribution
-  for the current checkpoints; the UI flags this with the OOD banner. To make
-  double/triple conditioning in-distribution, retrain with a reveal scheme that
-  exposes a random *subset* of latents (and, for GP, the kernel together with
-  continuous latents). Until then, multi-pin is a "what happens off-distribution"
-  demonstration, not a calibrated posterior.
+- **NEXT TODO — train multi-latent reveal (so playground multi-pin is in-distribution).**
+  This is the next planned task. Today both samplers reveal *at most one* latent as
+  context per example, so pinning two or three latents in the playground is
+  out-of-distribution (the UI flags it with the OOD banner) and not a calibrated
+  posterior — just a "what happens off-distribution" demonstration.
+  - **Why:** the playground's headline interaction is "pin latents and predict";
+    multi-pin should be a real conditional, not OOD.
+  - **What to change (samplers):** replace the single-reveal logic with an
+    independent reveal per latent over a random *subset*.
+    - `gp1d.sample_gp_batch`: drop `reveal_which` (the `randint(0,3)` pick of one of
+      lengthscale/outputscale/kernel); instead reveal each latent independently
+      (e.g. per-latent Bernoulli), masking each revealed latent into context and out
+      of the target. Allow the kernel to be revealed together with continuous latents.
+    - `gaussian_toy.sample_toy_batch`: replace the `reveal_mu` xor `reveal_logsig`
+      with independent reveals of `mu` and `log_sigma`.
+  - **Downstream after retraining:** re-run `playground/export_weights.py` for the
+    affected task(s), regenerate fixtures with `playground/parity.py` (they pin the
+    *current* checkpoint — see the fixtures+blob staleness gotcha above), and remove
+    the ≥2-pin OOD trigger in the playground (`PIN_OOD_MIN` in
+    `playground/src/config.ts` and the pin branch of `oodReasons` in
+    `playground/src/gp/demo.ts`).
+  - **Status (2026-06-07):** not done. The 12:52 GP retrain was a better
+    *single-reveal* checkpoint, not this — multi-latent training is still pending.
 
 ---
 
