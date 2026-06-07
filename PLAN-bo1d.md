@@ -1,27 +1,40 @@
 # Plan: 1D Bayesian optimization example (`bo1d.py`)
 
 Created: 2026-06-07
-Updated: 2026-06-07 (revised after a two-reviewer pass; see "Review notes")
-Status: IN PROGRESS
+Updated: 2026-06-07 (revised after a two-reviewer pass; then built and run)
+Status: COMPLETE (working; diagnostic effect is modest, loose tuning remains)
 
 ## Status
 
 Implemented: `ace_prior.sample_contaminated`; `bo1d.py` (schema, DGP, training,
-fixed three-prior diagnostic, plot, checkpoint helpers, `--scale-check`).
+fixed three-prior diagnostic, plot, checkpoint helpers, `--scale-check`). Docs in
+`README.md` and `AGENTS.md`.
 
-Validated: the DGP math, scaling, depth sampler, prior-feature consistency, and
-ε-contamination were checked via a pure-Python Monte-Carlo (this container has no
-torch/numpy and outbound install is blocked). Result: data token values sit in
-`[-1, 1]` with only ~0.3% stochastic-tail spill; the ε floor leaves ~ε/2 mass in
-the wrong half of a confident prior (the robustness mechanism). `py_compile`
-passes on the torch code.
+Validated by running (CPU, torch 2.12.0 in a local venv):
 
-**Not yet run:** the torch ACE forward/train/eval path (no torch in this
-environment). The token plumbing mirrors the three working examples and was
-statically reviewed, but `python bo1d.py --scale-check` and a short training run
-must be executed on a torch-equipped machine to confirm, plus scale re-tuning if
-the histogram differs from the pure-Python estimate. Remaining: verification run,
-artifact generation, and the README/AGENTS doc updates.
+- `--scale-check`: data token values sit in `[-1, 1]` with ~0.5% stochastic-tail
+  spill; the ε floor leaves ~ε/2 mass in the wrong half of a confident prior. This
+  matches the pure-Python Monte-Carlo estimate done first (~0.3% spill).
+- 12k-step CPU run, fixed diagnostic (truth `x_opt=0.40`, `y_opt=-0.60`):
+  - uniform prior: `x_opt` mean 0.70, std 0.149 (data alone is pulled toward the
+    lowest *observed* point at x≈0.7, since the true optimum sits unobserved
+    between context points -- a feature of the chosen case, not a bug);
+  - correct prior: `x_opt` mean 0.60, std 0.127 (tightens and shifts toward truth);
+  - wrong prior (mass at native ≈ -0.64): `x_opt` mean 0.59, std 0.189 -- the
+    posterior stays near the data instead of collapsing onto the wrong prior, and
+    widens (hedging). The ε floor resists the wrong prior, as designed.
+  - `y_opt` is well recovered (mean ≈ -0.50, std ≈ 0.08).
+
+So the structural checks pass: uniform→correct tightens/shifts toward truth, and
+correct→wrong is resisted. The effect is **directionally correct but modest** (the
+correct prior moves the mean 0.70→0.60, not all the way to 0.40) -- partly the
+deliberately hard fixed case, partly that ε=0.1 caps prior influence. Consistent
+with the project's loose-verification ethos.
+
+**Optional follow-up tuning** (not blocking): sharpen the correct-prior contrast
+via more steps, a less-misleading fixed case, a stronger correct prior, or a
+smaller ε; longer GPU training for a higher-quality retained artifact. The CPU
+loss is noisy across online batches (≈ -1.4 at 12k) and could be cosine-annealed.
 
 ## Summary
 

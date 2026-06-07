@@ -9,11 +9,19 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
-## 2026-06-07 — 1D Bayesian optimization example (planned)
+## 2026-06-07 — 1D Bayesian optimization example (`bo1d.py`)
 
-Full design in [PLAN-bo1d.md](PLAN-bo1d.md). Status: planned, not yet built.
-The plan was checked by two reviewers; this entry reflects the revised plan
-(see PLAN-bo1d.md "Review notes").
+Full design in [PLAN-bo1d.md](PLAN-bo1d.md). Status: **built and run**. The plan
+was checked by two reviewers, revised, then implemented and validated (CPU run,
+torch 2.12.0). The DGP, training, and three-prior diagnostic work end to end;
+`--scale-check` confirms data token values sit in `[-1, 1]` (~0.5% tail spill).
+The structural checks pass: uniform→correct tightens/shifts `p(x_opt | D)` toward
+truth, and the wrong prior is resisted (posterior stays near the data, not the
+wrong prior, thanks to the ε floor). The effect is directionally correct but
+modest (the chosen fixed case is deliberately hard -- the true optimum sits
+unobserved between context points -- and ε=0.1 caps prior influence); sharpening
+it is optional loose tuning, recorded in the plan's Status. This entry reflects
+the revised plan (see PLAN-bo1d.md "Review notes").
 
 - **Fourth example: `bo1d.py`.** 1D Bayesian optimization. The two latents are the
   global optimum's **location** `x_opt` and **value** `y_opt`. The headline is that
