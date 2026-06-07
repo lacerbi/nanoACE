@@ -42,6 +42,12 @@ Implemented modules:
   sampling, numerical grid posterior oracle, and a fixed diagnostic plot.
 - [diagnostics.py](diagnostics.py): reusable grid-query helpers for marginal and
   two-variable AR diagnostics.
+- [playground/](playground/): a **non-core**, fully in-browser TypeScript demo
+  (separate toolchain) where trained models run client-side — GP-1D and Gaussian,
+  with interactive conditioning, latent pinning, and an analytic oracle overlay.
+  See [playground/README.md](playground/README.md). The Python core stays
+  torch-only; the playground is an example built on a parity-tested TS port of
+  `ace.py`'s forward pass.
 - [DEVLOG.md](DEVLOG.md): design decisions and rationale. Read this before
   changing architecture or scope.
 

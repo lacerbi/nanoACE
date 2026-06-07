@@ -103,3 +103,9 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   Gaussian example and analytic oracle, `gp1d.py` for the executable GP regression
   example, and `diagnostics.py` for grid queries. `data.py` / `train.py` are planned in
   DEVLOG "Layout" but not yet built.
+- **`playground/` is a non-core example, not part of the core.** It is a Vite + TypeScript
+  in-browser demo that reimplements `ace.py`'s forward pass in TS (parity-tested against
+  the PyTorch model) so trained checkpoints run client-side. The core stays torch-only and
+  legible; do not let the JS toolchain or web concerns bleed into `ace.py` or the examples.
+  Treat it like `temp/` in spirit (separate, optional), but unlike `temp/` it *is* checked
+  in and maintained. See `playground/README.md` and the DEVLOG "Web playground" entry.

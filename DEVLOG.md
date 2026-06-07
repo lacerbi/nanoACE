@@ -9,6 +9,49 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-07 — Web playground (in-browser TS port)
+
+- **A non-core interactive demo lives in `playground/`.** It is an *example*, not
+  part of nanoACE: the core stays torch-only and legible, while `playground/`
+  carries a Vite + TypeScript toolchain. It reimplements `ace.py`'s forward pass
+  in TS so trained models run fully client-side (GitHub Pages, no server). Two
+  demos: GP-1D (add/drag points, infer the kernel, **pin a latent and predict**)
+  and Gaussian (Beta-prior sliders + observed `y`, with the analytic oracle
+  overlaid). The headline is that amortized conditioning is instant — a forward
+  pass per interaction — which is exactly what an interactive demo makes visible.
+- **The port is a frozen snapshot kept honest by a parity test.** `export_weights.py`
+  derives every constant from a live `ACE` instance (no hand re-encoding of the
+  schema) and writes plain float16 arrays + a JSON manifest — readable weights,
+  not a mystery binary, regenerable from a checkpoint. Weights are float16 to halve
+  the blobs (~3.6 MB total); parameters are rounded with `.half().float()` in
+  *both* the exporter and `parity.py`, so the shipped weights and the references
+  reflect identical values (only float32-vs-float64 arithmetic differs). `parity.py` dumps the real
+  model's embeddings, per-layer states, raw head outputs, and derived quantities
+  on deterministic cases covering every token path; `npm test` asserts the TS
+  forward reproduces them (and that each demo's orchestration matches `gp1d.py` /
+  `gaussian_toy.py`). PyTorch-float32 vs JS-float64 means the gate is a combined
+  relative+absolute tolerance, not bit-parity. If `ace.py`'s forward changes, the
+  parity test fails loudly and localizes the drift; re-port and regenerate.
+- **Weight hosting is an open decision; blobs are not committed (parked).** The
+  exported fp16 blobs (`playground/public/models/`) are gitignored for now.
+  Options: commit them (~3.6 MB today, but binary churn grows with retrains and
+  more examples), Git LFS (keeps `.git` lean, still same-origin), or runtime fetch
+  from an external host such as HF (adds a CORS + browser-caching dependency and
+  risks the fetched weights drifting out of sync with the parity-pinned code, the
+  one integrity property this design leans on). Regenerate locally via
+  `export_weights.py` meanwhile. The Pages deploy is blocked until this resolves.
+- **TODO — retrain for multi-latent reveal (multi-pin is currently OOD).** Both
+  samplers reveal *at most one* latent as context per example (`reveal_which` in
+  `gp1d`, `reveal_mu` xor `reveal_logsig` in `gaussian_toy`). The playground lets
+  users pin two or three latents at once, which is therefore out of distribution
+  for the current checkpoints; the UI flags this with the OOD banner. To make
+  double/triple conditioning in-distribution, retrain with a reveal scheme that
+  exposes a random *subset* of latents (and, for GP, the kernel together with
+  continuous latents). Until then, multi-pin is a "what happens off-distribution"
+  demonstration, not a calibrated posterior.
+
+---
+
 ## 2026-06-07 — Bounded latent coordinates and Beta information tokens
 
 - **Bounded continuous latents are tokenized to `[-1, 1]`.** `Variable.bounds`
@@ -187,12 +230,12 @@ example.
   posterior mass near 0.002 in this case, so that movement is not practically relevant.
   This is a one-case numerical check, not a benchmark harness.
 - **Current retained GP artifact.** The retained `artifacts/gp1d.pt` / `artifacts/gp1d.png`
-  pair is a 100k-step online run. The fixed diagnostic now uses a periodic generating
+  pair is a post-Beta-token-schema 100k-step online run. The fixed diagnostic uses a periodic generating
   kernel. The numerical oracle still leaves real uncertainty: posterior mass is roughly
   RBF 0.002, Matern-1/2 0.377, Matern-3/2 0.121, periodic 0.500. The checkpoint gives
-  roughly RBF 0.013, Matern-1/2 0.295, Matern-3/2 0.223, periodic 0.469. The
-  oracle-vs-ACE kernel KL is about 0.05; oracle predictive RMSE is about 0.35 and ACE
-  predictive RMSE is about 0.40. Treat the plot as an oracle-calibrated ambiguous
+  roughly RBF 0.007, Matern-1/2 0.152, Matern-3/2 0.083, periodic 0.759. The
+  oracle-vs-ACE kernel KL is about 0.18; oracle predictive RMSE is about 0.35 and ACE
+  predictive RMSE is about 0.39. Treat the plot as an oracle-calibrated ambiguous
   posterior, not as a hard truth-recovery example.
 
 ---
