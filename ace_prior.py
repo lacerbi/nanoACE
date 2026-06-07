@@ -88,3 +88,27 @@ def beta_logprior_on_grid(
     unit = ((grid_native - lo) / width).clamp(1e-6, 1.0 - 1e-6)
     alpha, beta = beta_alpha_beta(mu_unit, nu)
     return torch.distributions.Beta(alpha, beta).log_prob(unit) - math.log(width)
+
+
+def sample_contaminated(
+    mu_unit: torch.Tensor,
+    nu: torch.Tensor,
+    lo: float,
+    hi: float,
+    eps: float,
+) -> torch.Tensor:
+    """Draw a native value from an epsilon-contaminated Beta prior.
+
+    The effective prior is `(1 - eps) * Beta(mu_unit, nu) + eps * Uniform[lo, hi]`,
+    a classic robust-Bayes / epsilon-contamination prior. The *token* still encodes
+    only the raw Beta (see the prior helpers above); contamination lives only here,
+    in the truth draw, so the trained model learns a posterior whose uniform floor
+    keeps it from ever fully committing to a confident-but-wrong location. This is
+    the one thing `sample_prior_params` cannot do: it always draws truth from the
+    same Beta the token encodes, so the token never lies.
+    """
+
+    beta_draw = draw_from_beta(mu_unit, nu, lo, hi)
+    uniform_draw = torch.empty_like(beta_draw).uniform_(lo, hi)
+    contaminate = torch.rand_like(beta_draw) < eps
+    return torch.where(contaminate, uniform_draw, beta_draw)
