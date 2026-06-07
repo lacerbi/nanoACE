@@ -105,6 +105,15 @@ the revised plan (see PLAN-bo1d.md "Review notes").
 - **No BO loop.** No iterative acquisition rollout; the conditional
   `p(x_opt | y_opt = v, D)` is shown (via `conditional_log_density`, no
   `sample_ar`) to gesture at Thompson sampling, nothing more.
+- **Bigger default network than the other examples.** BO is the hardest task
+  (instance-level latents, multimodal `p(x_opt | D)`), and the paper's 1D-BO model
+  is correspondingly larger (`d_emb=256`, 6 layers, 16 heads, `K=20`). `bo1d`
+  defaults to `d_model=192`, **6 transformer blocks**, 16 heads, mlp 384, `K=12`
+  (~3.9M params, vs the ~1.2M `gp1d`/Gaussian defaults). Six blocks were adopted
+  deliberately (the 4-block default underfit the prior-integration); `K` is raised
+  from 8 to 12 for the multimodal location posterior. Still well short of the
+  paper's `5e5`-step budget -- CPU validation runs are necessarily undertrained;
+  real training is a GPU run.
 - **Scope note.** This is example #4; "nano ships exactly two" (initial design) is
   already stretched by SIR. BO earns its place: it adds instance-level latents, the
   optimum-posterior headline, and the robust prior-injection mechanism, none of
