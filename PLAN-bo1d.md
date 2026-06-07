@@ -2,7 +2,26 @@
 
 Created: 2026-06-07
 Updated: 2026-06-07 (revised after a two-reviewer pass; see "Review notes")
-Status: PLANNED
+Status: IN PROGRESS
+
+## Status
+
+Implemented: `ace_prior.sample_contaminated`; `bo1d.py` (schema, DGP, training,
+fixed three-prior diagnostic, plot, checkpoint helpers, `--scale-check`).
+
+Validated: the DGP math, scaling, depth sampler, prior-feature consistency, and
+ε-contamination were checked via a pure-Python Monte-Carlo (this container has no
+torch/numpy and outbound install is blocked). Result: data token values sit in
+`[-1, 1]` with only ~0.3% stochastic-tail spill; the ε floor leaves ~ε/2 mass in
+the wrong half of a confident prior (the robustness mechanism). `py_compile`
+passes on the torch code.
+
+**Not yet run:** the torch ACE forward/train/eval path (no torch in this
+environment). The token plumbing mirrors the three working examples and was
+statically reviewed, but `python bo1d.py --scale-check` and a short training run
+must be executed on a torch-equipped machine to confirm, plus scale re-tuning if
+the histogram differs from the pure-Python estimate. Remaining: verification run,
+artifact generation, and the README/AGENTS doc updates.
 
 ## Summary
 
@@ -199,10 +218,11 @@ accepting stochastic tails outside `[-1, 1]` (a soft convention per AGENTS.md, n
 clipping). There is a real tension: widening `Y_RANGE` to absorb the height also
 compresses `y_opt`'s resolution within `[-1, 1]`.
 
-Provisional numbers (all subject to the histogram check): `σ_f ~ U(0.1, 0.5)`,
-`|d| ≤ 2`, native `y_opt ∈ [-1, 0]`, `Y_RANGE = (-1.5, 2.0)`. Validate at sample
-time that drawn `y_opt` (and ideally typical `y`) stay within `Y_RANGE`; if
-`--sigma-f-max` is raised, `Y_RANGE` may need regenerating.
+As-built constants (validated by the scale check, see "Status"): `σ_f ~ U(0.1,
+0.5)`, `|d| ≤ 2`, native `y_opt ∈ [-1, 0]` (`Y_OPT_RANGE`), `Y_RANGE = (-1.0,
+2.0)`. `Y_RANGE` lower bound is exactly the global function floor (`f ≥ y_opt ≥
+-1`); the upper bound absorbs the bump. If `--sigma-f-max` is raised, `Y_RANGE`
+may need regenerating.
 
 The MDN predicts unconstrained mass in `[-1, 1]` token space (a known deferred
 caveat), so the displayed `x_opt`/`y_opt` marginals are the grid-renormalized
