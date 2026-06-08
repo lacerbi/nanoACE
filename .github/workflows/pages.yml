@@ -6,9 +6,14 @@ name: Deploy playground to GitHub Pages
 # Model weights live in a separate repository so normal nanoACE clones stay lean.
 # The workflow checks out that repository beside the app, copies only the model
 # directories into playground/public/models, then fails fast if any expected blob
-# is absent.
+# is absent or still a Git LFS pointer.
 on:
   workflow_dispatch:
+    inputs:
+      weights_ref:
+        description: Branch, tag, or commit from lacerbi/nanoACE-playground-weights
+        required: true
+        default: main
 
 permissions:
   contents: read
@@ -18,7 +23,7 @@ permissions:
 # Allow one concurrent deployment.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -32,7 +37,20 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: lacerbi/nanoACE-playground-weights
+          ref: ${{ inputs.weights_ref }}
           path: playground-models
+          lfs: true
+      - name: Record playground model weights revision
+        run: |
+          weights_sha="$(git -C ../playground-models rev-parse HEAD)"
+          echo "Using lacerbi/nanoACE-playground-weights@$weights_sha"
+          {
+            echo "### Playground model weights"
+            echo ""
+            echo "Repository: lacerbi/nanoACE-playground-weights"
+            echo "Ref input: ${{ inputs.weights_ref }}"
+            echo "Resolved commit: $weights_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Copy playground model weights
         run: |
           mkdir -p public/models
@@ -45,21 +63,56 @@ jobs:
       - run: npm ci
       - name: Require generated model weights
         run: |
-          for file in \
-            public/models/bo1d/manifest.json \
-            public/models/bo1d/weights.bin \
-            public/models/gp1d/manifest.json \
-            public/models/gp1d/weights.bin \
-            public/models/gaussian/manifest.json \
-            public/models/gaussian/weights.bin \
-            public/models/sbi_sir/manifest.json \
-            public/models/sbi_sir/weights.bin
-          do
-            if [ ! -f "$file" ]; then
-              echo "::error::Missing $file. Check the playground weights repository checkout."
+          for task in bo1d gp1d gaussian sbi_sir; do
+            manifest="public/models/$task/manifest.json"
+            weights="public/models/$task/weights.bin"
+            for file in "$manifest" "$weights"; do
+              if [ ! -f "$file" ]; then
+                echo "::error::Missing $file. Check the playground weights repository checkout."
+                exit 1
+              fi
+            done
+            if head -c 128 "$weights" | grep -q "git-lfs.github.com/spec"; then
+              echo "::error::$weights is a Git LFS pointer, not a resolved weight blob."
               exit 1
             fi
           done
+      - name: Validate model manifests
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, statSync } from "node:fs";
+
+          const tasks = ["bo1d", "gp1d", "gaussian", "sbi_sir"];
+          for (const task of tasks) {
+            const dir = `public/models/${task}`;
+            const manifest = JSON.parse(readFileSync(`${dir}/manifest.json`, "utf8"));
+            if (manifest.task !== task) {
+              throw new Error(`${dir}/manifest.json has task=${manifest.task}, expected ${task}`);
+            }
+            if (manifest.weights_file !== "weights.bin") {
+              throw new Error(`${dir}/manifest.json points at ${manifest.weights_file}, expected weights.bin`);
+            }
+            if (manifest.dtype !== "float16") {
+              throw new Error(`${dir}/manifest.json has dtype=${manifest.dtype}, expected float16`);
+            }
+            if (manifest.byte_order !== "little") {
+              throw new Error(`${dir}/manifest.json has byte_order=${manifest.byte_order}, expected little`);
+            }
+            const expectedBytes = manifest.total_floats * 2;
+            const actualBytes = statSync(`${dir}/weights.bin`).size;
+            if (actualBytes !== expectedBytes) {
+              throw new Error(`${dir}/weights.bin is ${actualBytes} bytes, expected ${expectedBytes}`);
+            }
+          }
+          JS
+      - name: Record model weight hashes
+        run: |
+          {
+            echo ""
+            echo "#### Model artifact SHA-256"
+            sha256sum public/models/*/manifest.json public/models/*/weights.bin
+          } >> "$GITHUB_STEP_SUMMARY"
+      - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

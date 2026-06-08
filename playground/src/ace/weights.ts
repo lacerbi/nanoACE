@@ -2,10 +2,10 @@
  * Weight manifest + blob loading.
  *
  * `export_weights.py` writes `manifest.json` (cfg, derived constants, variable
- * schema, and a tensor table) plus `weights.bin` (float32, little-endian). The
- * byte source is decoupled from decoding: `loadWeights` uses `fetch` in the
- * browser, while `weightsFromBytes` accepts raw bytes so the Node/vitest parity
- * test can feed `fs`-read data.
+ * schema, dtype, and a tensor table) plus `weights.bin` (currently float16,
+ * little-endian). The byte source is decoupled from decoding: `loadWeights`
+ * uses `fetch` in the browser, while `weightsFromBytes` accepts raw bytes so
+ * the Node/vitest parity test can feed `fs`-read data.
  */
 
 import type { VariableMeta } from "./schema";
@@ -32,7 +32,7 @@ export interface Derived {
 interface TensorMeta {
   name: string;
   shape: number[];
-  offset: number; // in float32 elements
+  offset: number; // in manifest dtype elements
   length: number;
 }
 

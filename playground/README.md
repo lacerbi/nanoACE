@@ -130,7 +130,11 @@ path is `/nanoACE/` (set automatically in CI via `GITHUB_ACTIONS`).
 The deploy workflow checks out
 [lacerbi/nanoACE-playground-weights](https://github.com/lacerbi/nanoACE-playground-weights)
 beside the app, copies the model directories into `public/models/`, then fails
-fast if any expected manifest/blob is missing.
+fast if any expected manifest/blob is missing or if `weights.bin` is still a Git
+LFS pointer. It also validates each manifest against its blob size, records
+resolved weight hashes in the run summary, runs `npm test`, and then builds. The
+manual workflow input `weights_ref` defaults to `main`; use a tag or commit SHA
+when you want the deployment to be reproducible.
 To update the deployed models after retraining, regenerate/export weights and
 parity fixtures together, push the new blobs to the weights repo, then trigger
 the manual Pages workflow in nanoACE.

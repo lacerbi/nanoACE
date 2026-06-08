@@ -25,8 +25,12 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   remain gitignored under `playground/public/models/` in nanoACE. GitHub Pages now
   checks out `lacerbi/nanoACE-playground-weights` beside the app, copies only the
   model directories into that path before building, then fails fast if any
-  expected `manifest.json`/`weights.bin` pair is missing. This keeps ordinary
-  nanoACE clones small while preserving a same-build checkout path for deployment.
+  expected `manifest.json`/`weights.bin` pair is missing or still a Git LFS
+  pointer. It validates each manifest against its blob size, records the resolved
+  weights commit and artifact hashes in the run summary, runs `npm test`, and
+  then builds. The manual workflow accepts a `weights_ref` branch/tag/SHA, so a
+  deploy can be pinned without changing nanoACE. This keeps ordinary nanoACE
+  clones small while preserving a same-build checkout path for deployment.
 
 ---
 
