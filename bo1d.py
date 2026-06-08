@@ -41,12 +41,13 @@ from __future__ import annotations
 
 import argparse
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 
-from ace import ACE, ACEConfig, Batch, PRIOR, PRIOR_FEATURES, QUERY, VALUE, Tokens, Variable, encode_value, sample_reveal_mask
+import train
+from ace import ACE, Batch, PRIOR, PRIOR_FEATURES, QUERY, VALUE, Tokens, Variable, encode_value, sample_reveal_mask
 from ace_prior_beta import (
     beta_logprior_on_grid,
     known_latent_features,
@@ -468,70 +469,14 @@ def sample_bo_batch(
     )
 
 
-def build_model(args, device: torch.device) -> ACE:
-    """Construct the BO ACE model from CLI hyperparameters."""
-
-    cfg = ACEConfig(
-        x_dim=1,
-        d_model=args.d_model,
-        n_heads=args.heads,
-        n_layers=args.layers,
-        mlp_hidden=args.hidden,
-        head_hidden=args.hidden,
-        mdn_components=args.components,
-    )
-    return ACE(variables(), cfg).to(device)
-
-
-def train(args: argparse.Namespace, model: ACE | None = None) -> ACE:
-    """Train ACE online on freshly sampled BO batches."""
-
-    device = torch.device(args.device)
-    torch.manual_seed(args.seed)
-    model = build_model(args, device) if model is None else model
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-    for step in range(1, args.steps + 1):
-        toy = sample_bo_batch(
-            model.variables,
-            batch_size=args.batch_size,
-            max_context=args.max_context,
-            min_context=args.min_context,
-            data_targets=args.data_targets,
-            device=device,
-            latent_context_prob=args.latent_context_prob,
-            prior_uniform_mix=args.prior_uniform_mix,
-            sigma_obs=args.sigma_obs,
-            sigma_f_max=args.sigma_f_max,
-            jitter=args.jitter,
-        )
-        loss = model.loss(toy.batch, latent_weight=args.latent_weight)
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
-        if step == 1 or step % args.log_every == 0:
-            print(f"step {step:5d}/{args.steps}  loss {loss.item():.4f}")
-    return model
-
-
-def save_checkpoint(model: ACE, path: str | Path, args: argparse.Namespace) -> None:
-    """Save a lightweight BO checkpoint."""
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"cfg": asdict(model.cfg), "seed": args.seed, "state_dict": model.state_dict()}, path)
-    print(f"saved checkpoint: {path}")
-
-
 def load_checkpoint(path: str | Path, device: torch.device) -> ACE:
-    """Load a BO checkpoint saved by `save_checkpoint`."""
+    """Load a BO checkpoint (2-arg wrapper over `train.load_checkpoint`).
 
-    payload = torch.load(path, map_location=device, weights_only=False)
-    cfg = ACEConfig(**payload["cfg"])
-    model = ACE(variables(), cfg).to(device)
-    model.load_state_dict(payload["state_dict"])
-    return model
+    Kept at this 2-arg signature because `playground/export_weights.py` and
+    `playground/parity.py` call `bo1d.load_checkpoint(path, device)` directly.
+    """
+
+    return train.load_checkpoint(path, device, variables())
 
 
 def fixed_eval_batch(vars_: list[Variable], *, device: torch.device | str, points: int, prior_kind: str, jitter: float) -> BOBatch:
@@ -824,37 +769,27 @@ def scale_check(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for the BO example."""
 
-    p = argparse.ArgumentParser(description="Train/evaluate the nanoACE 1D BO example.")
-    p.add_argument("--steps", type=int, default=500)
-    p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--max-context", type=int, default=12)
-    p.add_argument("--min-context", type=int, default=1)
-    p.add_argument("--data-targets", type=int, default=24)
+    p = argparse.ArgumentParser(parents=[train.common_parser()], description="Train/evaluate the nanoACE 1D BO example.")
+    p.set_defaults(
+        batch_size=64,
+        max_context=12,
+        min_context=1,
+        data_targets=24,
+        d_model=192,
+        heads=16,
+        layers=6,
+        hidden=384,
+        components=12,
+        plot_path="artifacts/bo1d.png",
+    )
     p.add_argument("--eval-points", type=int, default=160)
     p.add_argument("--bins", type=int, default=80, help="diagnostic grid bins")
-    p.add_argument("--d-model", type=int, default=192)
-    p.add_argument("--heads", type=int, default=16)
-    p.add_argument("--layers", type=int, default=6)
-    p.add_argument("--hidden", type=int, default=384)
-    p.add_argument("--components", type=int, default=12)
-    p.add_argument("--lr", type=float, default=3e-4)
-    p.add_argument("--latent-weight", type=float, default=2.0)
-    p.add_argument("--latent-context-prob", type=float, default=0.5,
-                   help="P(reveal any latents) per task; the revealed subset uses the shared mixture DGP")
     p.add_argument("--prior-uniform-mix", type=float, default=0.05, help="epsilon for the contaminated prior")
     p.add_argument("--sigma-obs", type=float, default=0.02)
     p.add_argument("--sigma-f-max", type=float, default=0.5)
     p.add_argument("--jitter", type=float, default=1e-5)
-    p.add_argument("--log-every", type=int, default=100)
-    p.add_argument("--plot-path", default="artifacts/bo1d.png")
-    p.add_argument("--no-plot", action="store_true")
-    p.add_argument("--save-checkpoint", default="")
-    p.add_argument("--load-checkpoint", default="")
-    p.add_argument("--eval-only", action="store_true")
     p.add_argument("--scale-check", action="store_true", help="sample a batch and report token scale, then exit")
-    return p.parse_args()
+    return train.apply_config_file(p)
 
 
 def main() -> None:
@@ -866,20 +801,47 @@ def main() -> None:
         return
 
     device = torch.device(args.device)
+    torch.manual_seed(args.seed)
+
+    if args.eval_only and not args.load_checkpoint:
+        raise SystemExit("--eval-only requires --load-checkpoint")
+
     if args.load_checkpoint:
         model = load_checkpoint(args.load_checkpoint, device)
-    elif args.eval_only:
-        raise SystemExit("--eval-only requires --load-checkpoint")
+    elif args.resume:
+        model = load_checkpoint(args.resume, device)
     else:
-        model = None
+        model = train.build_model(args, variables(), device)
 
     if not args.eval_only:
-        model = train(args, model)
-    assert model is not None
+        resume_state = (
+            torch.load(args.resume, map_location=device, weights_only=False) if args.resume else None
+        )
+        model = train.fit(
+            model,
+            lambda: sample_bo_batch(
+                model.variables,
+                batch_size=args.batch_size,
+                max_context=args.max_context,
+                min_context=args.min_context,
+                data_targets=args.data_targets,
+                device=device,
+                latent_context_prob=args.latent_context_prob,
+                prior_uniform_mix=args.prior_uniform_mix,
+                sigma_obs=args.sigma_obs,
+                sigma_f_max=args.sigma_f_max,
+                jitter=args.jitter,
+            ).batch,
+            train.TrainConfig.from_args(args),
+            resume_state=resume_state,
+            seed=args.seed,
+            checkpoint_path=args.save_checkpoint or None,
+            ckpt_every=args.ckpt_every,
+        )
 
     diag = evaluate(model, args)
     if args.save_checkpoint:
-        save_checkpoint(model, args.save_checkpoint, args)
+        train.save_checkpoint(args.save_checkpoint, model, seed=args.seed, config=vars(args))
     if not args.no_plot and args.plot_path:
         plot_diagnostic(diag, args.plot_path, eps=args.prior_uniform_mix)
 

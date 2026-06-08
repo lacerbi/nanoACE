@@ -37,6 +37,12 @@ Implemented modules:
   helpers that build and score the two-feature `(mean, spread)` information
   tokens used by the prior-conditioning examples. Model-side PRIOR token
   semantics live in [ace.py](ace.py).
+- [train.py](train.py): shared training infrastructure for the examples — the
+  Adam + grad-clip loop (`fit`), cosine LR (default) or constant, simple resume,
+  checkpoint save/load, model construction, and a `common_parser()` argparse
+  parent with a light-YAML `--config`. Each example keeps its own `main()`,
+  sampler, and diagnostics; `fit` takes a `() -> Batch` thunk so a future sharded
+  `data.py` reader drops in unchanged.
 - [gaussian_toy.py](gaussian_toy.py): Gaussian ACEP toy with two bounded
   continuous latents, runtime Beta information tokens, online
   training/evaluation CLI, analytic grid posterior, posterior predictive,
@@ -81,6 +87,7 @@ wheel that has been tested on this workstation:
 - `torch==2.11.0+cu128`
 - PyTorch CUDA runtime 12.8
 - NVIDIA RTX 4060 Laptop GPU
+- `PyYAML` (only used by `train.py`'s optional `--config`; pulled in by `requirements.txt`)
 
 PowerShell:
 
@@ -93,6 +100,37 @@ python -m venv .venv
 
 Each example is a standalone script: it trains online, prints fixed diagnostic
 summaries, and usually writes an artifact plot/checkpoint when requested.
+
+### Shared training options
+
+All four examples share the training flags defined in [train.py](train.py):
+
+- `--lr-schedule {cosine,constant}` (default `cosine`) and `--warmup N`.
+- `--resume <ckpt>` and `--ckpt-every N` for simple resume. A resumable checkpoint
+  carries optimizer/scheduler/step; resume with the **same** `--steps` the run was
+  started with (the cosine curve is sized to the total budget). The data RNG is not
+  checkpointed, so a resumed run's batches differ from an uninterrupted one.
+- `--config run.yaml` loads defaults from a YAML file; explicit CLI flags still win
+  (precedence: example defaults < `--config` < CLI). YAML keys are the argument names
+  with underscores; unknown keys are rejected and values are coerced/validated like CLI
+  args. (One asymmetry: `store_true` flags such as `no_plot`/`eval_only` can be turned
+  *on* from YAML but not back *off* from the CLI.) Example:
+
+  ```yaml
+  # run.yaml
+  steps: 10000
+  lr: 3.0e-4
+  lr_schedule: cosine
+  warmup: 500
+  latent_context_prob: 0.5
+  ```
+
+  ```powershell
+  .\.venv\Scripts\python.exe gp1d.py --config run.yaml --save-checkpoint artifacts\gp1d.pt
+  ```
+
+The final `--save-checkpoint` is model-only (`cfg`/`seed`/`state_dict`) plus a `config`
+provenance record; it stays compatible with the playground exporter and older checkpoints.
 
 ### Gaussian ACEP
 

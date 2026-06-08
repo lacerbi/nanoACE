@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import argparse
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 
-from ace import ACE, ACEConfig, Batch, PRIOR, PRIOR_FEATURES, QUERY, VALUE, Tokens, Variable, encode_value, sample_reveal_mask
+import train
+from ace import ACE, Batch, PRIOR, PRIOR_FEATURES, QUERY, VALUE, Tokens, Variable, encode_value, sample_reveal_mask
 from diagnostics import normalized_moments, query_log_density, repeat_tokens
 
 
@@ -308,67 +309,14 @@ def sample_gp_batch(
     return GPBatch(Batch(vars_, context, target), x[:, :max_context], y[:, :max_context], x[:, max_context:], y[:, max_context:], log_ell, log_scale, kernel)
 
 
-def build_model(args, device: torch.device) -> ACE:
-    """Construct the GP-1D ACE model from CLI hyperparameters."""
-
-    cfg = ACEConfig(
-        x_dim=1,
-        d_model=args.d_model,
-        n_heads=args.heads,
-        n_layers=args.layers,
-        mlp_hidden=args.hidden,
-        head_hidden=args.hidden,
-        mdn_components=args.components,
-    )
-    return ACE(variables(), cfg).to(device)
-
-
-def train(args: argparse.Namespace, model: ACE | None = None) -> ACE:
-    """Train ACE online on freshly sampled GP-1D batches."""
-
-    device = torch.device(args.device)
-    torch.manual_seed(args.seed)
-    model = build_model(args, device) if model is None else model
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-    for step in range(1, args.steps + 1):
-        toy = sample_gp_batch(
-            model.variables,
-            batch_size=args.batch_size,
-            max_context=args.max_context,
-            min_context=args.min_context,
-            data_targets=args.data_targets,
-            device=device,
-            latent_context_prob=args.latent_context_prob,
-            jitter=args.jitter,
-        )
-        loss = model.loss(toy.batch, latent_weight=args.latent_weight)
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
-        if step == 1 or step % args.log_every == 0:
-            print(f"step {step:5d}/{args.steps}  loss {loss.item():.4f}")
-    return model
-
-
-def save_checkpoint(model: ACE, path: str | Path, args: argparse.Namespace) -> None:
-    """Save a lightweight GP-1D checkpoint."""
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"cfg": asdict(model.cfg), "seed": args.seed, "state_dict": model.state_dict()}, path)
-    print(f"saved checkpoint: {path}")
-
-
 def load_checkpoint(path: str | Path, device: torch.device) -> ACE:
-    """Load a GP-1D checkpoint saved by `save_checkpoint`."""
+    """Load a GP-1D checkpoint (2-arg wrapper over `train.load_checkpoint`).
 
-    payload = torch.load(path, map_location=device, weights_only=False)
-    cfg = ACEConfig(**payload["cfg"])
-    model = ACE(variables(), cfg).to(device)
-    model.load_state_dict(payload["state_dict"])
-    return model
+    Kept at this 2-arg signature because `playground/export_weights.py` and
+    `playground/parity.py` call `gp1d.load_checkpoint(path, device)` directly.
+    """
+
+    return train.load_checkpoint(path, device, variables())
 
 
 def fixed_eval_batch(vars_: list[Variable], *, device: torch.device | str, points: int, jitter: float) -> GPBatch:
@@ -680,34 +628,24 @@ def plot_diagnostic(diag: Diagnostic, path: str | Path) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for the GP-1D example."""
 
-    p = argparse.ArgumentParser(description="Train/evaluate the nanoACE GP-1D toy.")
-    p.add_argument("--steps", type=int, default=500)
-    p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--max-context", type=int, default=14)
-    p.add_argument("--min-context", type=int, default=4)
-    p.add_argument("--data-targets", type=int, default=32)
+    p = argparse.ArgumentParser(parents=[train.common_parser()], description="Train/evaluate the nanoACE GP-1D toy.")
+    p.set_defaults(
+        batch_size=64,
+        max_context=14,
+        min_context=4,
+        data_targets=32,
+        d_model=128,
+        heads=4,
+        layers=4,
+        hidden=256,
+        components=8,
+        plot_path="artifacts/gp1d.png",
+    )
     p.add_argument("--eval-points", type=int, default=160)
     p.add_argument("--oracle-bins", type=int, default=64)
     p.add_argument("--oracle-chunk", type=int, default=512)
-    p.add_argument("--d-model", type=int, default=128)
-    p.add_argument("--heads", type=int, default=4)
-    p.add_argument("--layers", type=int, default=4)
-    p.add_argument("--hidden", type=int, default=256)
-    p.add_argument("--components", type=int, default=8)
-    p.add_argument("--lr", type=float, default=3e-4)
-    p.add_argument("--latent-weight", type=float, default=2.0)
-    p.add_argument("--latent-context-prob", type=float, default=0.5,
-                   help="P(reveal any latents) per task; the revealed subset uses the shared mixture DGP")
     p.add_argument("--jitter", type=float, default=1e-5)
-    p.add_argument("--log-every", type=int, default=100)
-    p.add_argument("--plot-path", default="artifacts/gp1d.png")
-    p.add_argument("--no-plot", action="store_true")
-    p.add_argument("--save-checkpoint", default="")
-    p.add_argument("--load-checkpoint", default="")
-    p.add_argument("--eval-only", action="store_true")
-    return p.parse_args()
+    return train.apply_config_file(p)
 
 
 def main() -> None:
@@ -715,20 +653,44 @@ def main() -> None:
 
     args = parse_args()
     device = torch.device(args.device)
+    torch.manual_seed(args.seed)
+
+    if args.eval_only and not args.load_checkpoint:
+        raise SystemExit("--eval-only requires --load-checkpoint")
+
     if args.load_checkpoint:
         model = load_checkpoint(args.load_checkpoint, device)
-    elif args.eval_only:
-        raise SystemExit("--eval-only requires --load-checkpoint")
+    elif args.resume:
+        model = load_checkpoint(args.resume, device)
     else:
-        model = None
+        model = train.build_model(args, variables(), device)
 
     if not args.eval_only:
-        model = train(args, model)
-    assert model is not None
+        resume_state = (
+            torch.load(args.resume, map_location=device, weights_only=False) if args.resume else None
+        )
+        model = train.fit(
+            model,
+            lambda: sample_gp_batch(
+                model.variables,
+                batch_size=args.batch_size,
+                max_context=args.max_context,
+                min_context=args.min_context,
+                data_targets=args.data_targets,
+                device=device,
+                latent_context_prob=args.latent_context_prob,
+                jitter=args.jitter,
+            ).batch,
+            train.TrainConfig.from_args(args),
+            resume_state=resume_state,
+            seed=args.seed,
+            checkpoint_path=args.save_checkpoint or None,
+            ckpt_every=args.ckpt_every,
+        )
 
     diag = evaluate(model, args)
     if args.save_checkpoint:
-        save_checkpoint(model, args.save_checkpoint, args)
+        train.save_checkpoint(args.save_checkpoint, model, seed=args.seed, config=vars(args))
     if not args.no_plot and args.plot_path:
         plot_diagnostic(diag, args.plot_path)
 

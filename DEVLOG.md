@@ -9,6 +9,69 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-08 — Shared `train.py` (loop + checkpoint + light-YAML config + resume)
+
+Full plan and verification log: [docs/plans/PLAN-train-loop-extraction.md](docs/plans/PLAN-train-loop-extraction.md).
+
+- **Why.** The four examples carried byte-identical training loops, `build_model`,
+  `save_checkpoint`/`load_checkpoint`, and ~21 overlapping CLI args. That boilerplate now
+  lives in `train.py`; each example keeps only its task-specific science (`variables()`,
+  the batch sampler, `evaluate()`, `plot_diagnostic()`) and a thin `main()`. This is the
+  long-planned `train.py` from the "Layout" section, built now because it is also the only
+  place to add the two training features the project wanted but lacked: **cosine LR** and
+  **simple resume** (DEVLOG "Training / ops" Keep list).
+- **`main()` is deliberately NOT centralized.** Keeping each example runnable/readable
+  end-to-end is the guardrail (initial design: "no separate generic command-line wrapper").
+  `train.py` exposes plain functions — `common_parser()`, `build_model(args, variables,
+  device)`, `TrainConfig`, `fit(model, sample_batch, cfg, ...)`, the checkpoint helpers —
+  not a `Task`/registry/config framework.
+- **`fit` takes a `() -> Batch` thunk.** Each example passes
+  `lambda: sample_X(...).batch`. The same interface lets a future sharded `data.py`
+  reader drop in with no second code path — so `data.py` stays **deferred** (no GP/BO
+  pooled run has made online Cholesky the bottleneck yet).
+- **No prefetch, documented in code.** `fit` reads one batch per step synchronously; the
+  expensive work (Cholesky) is inside the thunk, not a separate producer, so there is
+  nothing to prefetch. The rationale the old "Training / ops" entry asked for now has a
+  home (a module docstring note in `train.py`).
+- **Cosine LR is the new default** (`--lr-schedule {cosine,constant}`, `--warmup`). This
+  changes future *from-scratch retrains* vs the constant-LR committed artifacts — fine,
+  artifacts are regenerable, and `--lr-schedule constant` exactly reproduces the old loop
+  (used to prove the extraction is behaviour-preserving: all four examples reproduce their
+  pre-refactor loss trajectories bit-for-bit under `constant`).
+- **Simple resume** (`--resume`, `--ckpt-every`). A resumable checkpoint adds
+  `{optimizer, scheduler, step}`; `load_train_state` restores them and continues from the
+  saved step. Resume = **same total `--steps` budget** (cosine `T_max` is the run total, so
+  a different `--steps` would mis-align the curve — `fit` warns on mismatch). The torch
+  **RNG state is not checkpointed**, so a resumed run's data stream differs from an
+  uninterrupted one — this is the intended "simple resume", not exact-stream replay.
+- **Checkpoint format is backward compatible (additive keys).** `save_checkpoint` always
+  writes `{cfg, seed, state_dict}`, adds `config` (resolved-run provenance, `vars(args)`)
+  on the final save, and `{optimizer, scheduler, step}` only for resumable checkpoints.
+  `load_checkpoint` reads only `cfg`/`state_dict`; legacy three-key files (the committed
+  `artifacts/*.pt`) load unchanged, and `load_train_state` tolerates the resume keys being
+  absent. The **final `--save-checkpoint` stays model-only** (+`config`), so committed
+  artifacts and the playground stay lean.
+- **The one playground constraint.** `playground/export_weights.py` and
+  `playground/parity.py` call `<module>.load_checkpoint(path, device)` with two args and
+  use `<module>.variables()`. So each example keeps a 2-arg `load_checkpoint(path, device)`
+  wrapper forwarding to `train.load_checkpoint(path, device, variables())`. No playground
+  file changed; `parity.py` regenerated its 8 tracked fixtures byte-identically after the
+  refactor (load+forward path unchanged).
+- **Seed ordering — from-scratch is exactly preserved.** `main()` seeds once, then
+  build-or-load, then `fit` (which draws no RNG before the first batch). The
+  load-then-train path's RNG timing shifts slightly (today's `load_checkpoint` ran before
+  the seed; now it runs after) — immaterial: it was never a reproducibility guarantee and
+  `--eval-only` never trains.
+- **Config: dataclass + light YAML, no framework.** `--config run.yaml` is layered under
+  explicit CLI flags via `set_defaults` (precedence: parent/per-example defaults < YAML <
+  CLI); YAML keys are arg dest names (underscored) and unknown keys are rejected so typos
+  fail loudly. `TrainConfig.from_args` feeds `fit`. **Hydra/omegaconf were considered and
+  declined**: Hydra is the "config framework" this repo excludes, adds heavy deps, and its
+  `@hydra.main` working-directory change would relocate the examples' relative `artifacts/`
+  outputs. Adds one small dep (PyYAML, pinned in `requirements.txt`).
+
+---
+
 ## 2026-06-07 - BO-1D playground tab
 
 - **BO added to the non-core web playground.** `playground/` now has a fourth tab for

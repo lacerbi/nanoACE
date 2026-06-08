@@ -73,8 +73,9 @@ plotted as the reference.
 ## Architecture (the cross-file picture)
 
 Everything routes through one idea: **variables as tokens**. The model is in
-`ace.py`; `gaussian_toy.py`, `gp1d.py`, `sbi_sir.py`, and `bo1d.py` are the current
-executable task examples built on top of it.
+`ace.py`; `train.py` holds the shared training loop, checkpointing, and CLI/config
+plumbing; `gaussian_toy.py`, `gp1d.py`, `sbi_sir.py`, and `bo1d.py` are the current
+executable task examples built on top of both.
 
 - **Data model (`ace.py`).** `Variable` is the static schema (name, `kind` data/latent,
   continuous/discrete + `cardinality`, `transform`, optional bounded continuous-latent
@@ -105,6 +106,17 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   prediction map (independent 1-D marginals). `sample_ar` builds joint samples by
   predicting one target, sampling it, appending data/discrete samples as `VALUE` tokens
   and bounded continuous latent samples as zero-spread `PRIOR` tokens, then repeating.
+- **Training spine (`train.py`).** The four examples share one loop, checkpoint format,
+  `build_model`, and a `common_parser()` argparse parent (with a light-YAML `--config`
+  layered under explicit CLI flags). `fit` takes a `() -> Batch` thunk (online today; a
+  sharded `data.py` reader later — so no second code path), runs Adam + grad-clip with
+  cosine LR (default; `--lr-schedule constant` reproduces the old loop) and supports
+  simple resume (`--resume`/`--ckpt-every`). Each example keeps its own `main()`, sampler,
+  `evaluate`, `plot_diagnostic`, and a 2-arg `load_checkpoint(path, device)` wrapper (the
+  contract the playground calls). Checkpoints are `{cfg, seed, state_dict}` plus optional
+  `config` provenance and optional `{optimizer, scheduler, step}` for resume — all
+  additive, so legacy files still load. No prefetch (synchronous online generation), by
+  design. `main()` is intentionally not centralized (examples stay readable end-to-end).
 
 ## Conventions and gotchas
 
@@ -139,13 +151,15 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   systems, and resume matrices should not be copied into this repository.
 - **Currently implemented:** `ace.py` for the model, `ace_prior_beta.py` for the
   shared Beta-specific ACEP prior-token helpers (including `sample_contaminated`
-  for robust priors),
+  for robust priors), `train.py` for the shared training loop / checkpointing /
+  argparse parent + light-YAML config / cosine LR / simple resume,
   `gaussian_toy.py` for the executable Gaussian example and analytic oracle, `gp1d.py` for
   the executable GP regression example, `sbi_sir.py` for the executable SIR
   simulation-based-inference example, `bo1d.py` for the executable 1D Bayesian
   optimization example (optimum latents + runtime prior injection, no oracle), and
-  `diagnostics.py` for grid queries. `data.py` / `train.py` are planned in DEVLOG "Layout"
-  but not yet built.
+  `diagnostics.py` for grid queries. `data.py` (the sharded saved-pool path) is planned in
+  DEVLOG "Layout" but not yet built (`train.fit` already takes a `() -> Batch` source so it
+  slots in later).
 - **`playground/` is a non-core example, not part of the core.** It is a Vite + TypeScript
   in-browser demo that reimplements `ace.py`'s forward pass in TS (parity-tested against
   the PyTorch model) so trained checkpoints run client-side. Current tabs cover GP-1D,
