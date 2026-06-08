@@ -268,7 +268,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
   function drawBottomDensity(p: Plot, grid: number[], probs: number[], color: string, fill: string, ampScale: number): void {
     const peak = Math.max(...probs, 1e-12);
     const yr = BO.Y_VIEW[1] - BO.Y_VIEW[0];
-    const base = BO.Y_VIEW[0] + 0.035 * yr;
+    const base = BO.Y_VIEW[0];
     const amp = ampScale * yr;
     const lo = grid.map(() => base);
     const hi = probs.map((v) => base + (v / peak) * amp);
@@ -279,7 +279,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
   function drawRightDensity(p: Plot, grid: number[], probs: number[], color: string, fill: string, ampScale: number): void {
     const peak = Math.max(...probs, 1e-12);
     const xr = BO.X_DOMAIN[1] - BO.X_DOMAIN[0];
-    const right = BO.X_DOMAIN[1] - 0.025 * xr;
+    const right = BO.X_DOMAIN[1];
     const amp = ampScale * xr;
     const xs = probs.map((v) => right - (v / peak) * amp);
     const ctx = p.ctx;
@@ -328,10 +328,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
       4,
     );
     mainPlot.axes();
-    const ctx = mainPlot.ctx;
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "11px system-ui";
-    ctx.fillText("observations and optimum posteriors", 44, 14);
+    mainPlot.label("observations and optimum posteriors", 50, 14);
     mainPlot.warning(warning);
   }
 

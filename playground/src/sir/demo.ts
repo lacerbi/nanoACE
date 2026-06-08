@@ -305,10 +305,7 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
       4,
     );
     mainPlot.axes();
-    const ctx = mainPlot.ctx;
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "11px system-ui";
-    ctx.fillText("infected fraction over time", 44, 14);
+    mainPlot.label("infected fraction over time", 50, 14);
     mainPlot.warning(warning);
   }
 

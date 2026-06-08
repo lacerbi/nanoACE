@@ -24,6 +24,7 @@ export interface Plot {
   dots(pts: Array<[number, number]>, fill: string, r?: number): void;
   vline(x: number, style: string, width?: number, dash?: number[]): void;
   hline(y: number, style: string, width?: number, dash?: number[]): void;
+  label(text: string, x: number, y: number, opts?: { fill?: string; background?: string; font?: string }): void;
   axes(style?: string): void;
   warning(text: string): void;
 }
@@ -123,6 +124,22 @@ export function makePlot(canvas: HTMLCanvasElement, opts: PlotOpts): Plot {
       ctx.strokeStyle = style;
       ctx.lineWidth = width;
       ctx.stroke();
+      ctx.restore();
+    },
+    label(text, x, y, opts = {}) {
+      ctx.save();
+      ctx.font = opts.font ?? "11px system-ui";
+      ctx.textBaseline = "middle";
+      const padX = 5;
+      const padY = 3;
+      const h = 14;
+      const measured = ctx.measureText(text);
+      const textW = measured && Number.isFinite(measured.width) ? measured.width : text.length * 6;
+      const w = textW + 2 * padX;
+      ctx.fillStyle = opts.background ?? "rgba(255, 255, 255, 0.92)";
+      ctx.fillRect(x - padX, y - h / 2 - padY, w, h + 2 * padY);
+      ctx.fillStyle = opts.fill ?? "#9ca3af";
+      ctx.fillText(text, x, y);
       ctx.restore();
     },
     axes(style = "#9ca3af") {

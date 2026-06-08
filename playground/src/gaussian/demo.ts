@@ -265,9 +265,7 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
       ctx.fill();
     }
     mainPlot.axes();
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "11px system-ui";
-    ctx.fillText("posterior predictive p(new y)", 44, 14);
+    mainPlot.label("posterior predictive p(new y)", 50, 14);
     mainPlot.warning(warning);
   }
 

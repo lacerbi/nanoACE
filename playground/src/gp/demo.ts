@@ -392,12 +392,8 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     if (res.scalePost)
       p.line(res.scaleGrid, peak(res.scalePost), "#ea580c", 1.8);
     else p.vline(scaleVal, "#ea580c", 3);
-    const ctx = p.ctx;
-    ctx.font = "11px system-ui";
-    ctx.fillStyle = "#2563eb";
-    ctx.fillText(pin.ell ? "lengthscale (pinned)" : "lengthscale", 44, 16);
-    ctx.fillStyle = "#ea580c";
-    ctx.fillText(pin.scale ? "outputscale (pinned)" : "outputscale", 44, 30);
+    p.label(pin.ell ? "lengthscale (pinned)" : "lengthscale", 50, 16, { fill: "#2563eb" });
+    p.label(pin.scale ? "outputscale (pinned)" : "outputscale", 50, 30, { fill: "#ea580c" });
   }
 
   render();
