@@ -40,7 +40,7 @@ describe("Gaussian demo UI smoke", () => {
 
     expect(el.querySelector(".ga-main")).not.toBeNull();
     expect(el.querySelector(".ga-mu")).not.toBeNull();
-    expect(el.querySelector<HTMLDivElement>(".ga-banner")!.hidden).toBe(true);
+    expect(el.querySelector(".ga-banner")).toBeNull();
 
     // Crank the μ-prior concentration and re-render.
     const muNu = el.querySelector<HTMLInputElement>(".mu-nu")!;

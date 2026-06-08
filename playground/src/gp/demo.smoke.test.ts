@@ -44,17 +44,20 @@ describe("GP demo UI smoke", () => {
     await mountGP(el);
 
     expect(el.querySelector(".gp-main")).not.toBeNull();
-    const banner = el.querySelector<HTMLDivElement>(".gp-banner")!;
-    expect(banner.hidden).toBe(true); // 5 in-range points, no pins -> no OOD
+    expect(el.querySelector(".gp-banner")).toBeNull();
 
     const kernelBtns = el.querySelectorAll<HTMLButtonElement>(".gp-kernel-btns button");
     expect(kernelBtns.length).toBe(5); // Unknown + 4 kernels
+    expect(el.querySelector<HTMLButtonElement>(".reset")?.textContent).toBe("Reset points");
+    expect(el.querySelector<HTMLButtonElement>(".clear")?.textContent).toBe("Clear points");
+    expect(el.querySelector<HTMLButtonElement>(".uniform")).toBeNull();
 
     // Pin the kernel (one latent pinned is still in-distribution).
     kernelBtns[4].click();
-    expect(banner.hidden).toBe(true);
+    expect(el.querySelector(".gp-main")).not.toBeNull();
 
     // Clearing points should not throw (empty-context guard path).
     el.querySelector<HTMLButtonElement>(".clear")!.click();
+    el.querySelector<HTMLButtonElement>(".reset")!.click();
   });
 });

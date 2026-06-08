@@ -4,8 +4,7 @@
  * Click to add a context point, drag to move, shift-click to delete. Every change
  * triggers one ACE forward (via `gpInfer`) and redraws the posterior predictive
  * band, the kernel posterior, and the lengthscale/outputscale marginals. Any
- * latent can be pinned into context; pinning ≥2 at once is OOD for the current
- * checkpoint and raises the banner.
+ * latent can be pinned into context.
  */
 
 import { GP, KERNEL_LABELS } from "../config";
@@ -29,8 +28,6 @@ interface PinState {
 const CSS = `
 .gp-root { display: flex; flex-direction: column; gap: 12px; }
 .gp-hint { color: var(--muted); margin: 0; }
-.gp-banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #fed7aa;
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .gp-top { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
 .gp-main { border: 1px solid var(--line); border-radius: 8px; background: #fff; touch-action: none; }
 .gp-controls { display: flex; flex-direction: column; gap: 14px; min-width: 240px; }
@@ -46,8 +43,9 @@ const CSS = `
 .gp-panels { display: flex; gap: 18px; flex-wrap: wrap; }
 .gp-panel { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 6px; }
 .gp-panel h4 { margin: 2px 6px 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.gp-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .gp-btn { font: inherit; padding: 6px 10px; border: 1px solid var(--line); background: #fff;
-  border-radius: 6px; cursor: pointer; align-self: flex-start; }
+  border-radius: 6px; cursor: pointer; }
 `;
 
 function injectCss(): void {
@@ -67,7 +65,7 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   const scaleMeta = model.variables[2];
 
   // --- state ---
-  const points: Point[] = [
+  const defaultPoints: Point[] = [
     { x: -0.9, y: -0.4 },
     { x: -0.55, y: 0.15 },
     { x: -0.2, y: 0.55 },
@@ -75,6 +73,7 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     { x: 0.5, y: 0.05 },
     { x: 0.85, y: -0.5 },
   ];
+  const points: Point[] = defaultPoints.map((p) => ({ ...p }));
   const pin: PinState = { kernel: null, ell: false, scale: false };
   let ellVal = 0.5 * (ellMeta.bound_lo + ellMeta.bound_hi);
   let scaleVal = 0.5 * (scaleMeta.bound_lo + scaleMeta.bound_hi);
@@ -87,7 +86,6 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   root.innerHTML = `
     <p class="gp-hint">Click empty space to add a point · drag a point to move it · shift-click to delete.
       The model re-conditions instantly on every change.</p>
-    <div class="gp-banner" hidden></div>
     <div class="gp-top">
       <canvas class="gp-main" width="660" height="380" style="width:660px;height:380px;"></canvas>
       <div class="gp-controls">
@@ -105,7 +103,10 @@ export async function mountGP(el: HTMLElement): Promise<void> {
           <label class="gp-slider-row"><input type="checkbox" class="pin-scale"/>pin (condition on this value)</label>
           <div class="gp-slider-row"><input type="range" class="scale"/><span class="val scale-val"></span></div>
         </fieldset>
-        <button class="gp-btn clear">Clear points</button>
+        <div class="gp-btns">
+          <button class="gp-btn reset">Reset points</button>
+          <button class="gp-btn clear">Clear points</button>
+        </div>
       </div>
     </div>
     <div class="gp-panels">
@@ -117,7 +118,6 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   `;
   el.appendChild(root);
 
-  const banner = root.querySelector<HTMLDivElement>(".gp-banner")!;
   const mainCanvas = root.querySelector<HTMLCanvasElement>(".gp-main")!;
   const kernelCanvas = root.querySelector<HTMLCanvasElement>(".gp-kernel")!;
   const latentCanvas = root.querySelector<HTMLCanvasElement>(".gp-latents")!;
@@ -167,12 +167,15 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     pin.scale = pinScale.checked;
     render();
   });
-  root
-    .querySelector<HTMLButtonElement>(".clear")!
-    .addEventListener("click", () => {
-      points.length = 0;
-      render();
-    });
+  root.querySelector<HTMLButtonElement>(".reset")!.addEventListener("click", () => {
+    points.length = 0;
+    points.push(...defaultPoints.map((p) => ({ ...p })));
+    render();
+  });
+  root.querySelector<HTMLButtonElement>(".clear")!.addEventListener("click", () => {
+    points.length = 0;
+    render();
+  });
 
   // pointer interaction
   let mainPlot: Plot | null = null;
@@ -252,10 +255,7 @@ export async function mountGP(el: HTMLElement): Promise<void> {
   function render(): void {
     updateControls();
     const reasons = oodReasons();
-    banner.hidden = reasons.length === 0;
-    banner.textContent = reasons.length
-      ? `⚠ Out of training distribution: ${reasons.join(" · ")}`
-      : "";
+    const warning = reasons.length ? `Out of training distribution: ${reasons.join(" / ")}` : "";
 
     const spec: GPSpec = {
       points,
@@ -266,11 +266,11 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     const res = gpInfer(model, spec);
 
     if (!res.hasContext) {
-      drawEmptyMain();
+      drawEmptyMain(warning);
       clearPanels();
       return;
     }
-    drawMain(res);
+    drawMain(res, warning);
     drawKernel(res.kernelProbs);
     drawLatents(res);
   }
@@ -292,7 +292,7 @@ export async function mountGP(el: HTMLElement): Promise<void> {
     return p;
   }
 
-  function drawEmptyMain(): void {
+  function drawEmptyMain(warning: string): void {
     mainPlot = baseMain();
     mainPlot.axes();
     const ctx = mainPlot.ctx;
@@ -305,9 +305,10 @@ export async function mountGP(el: HTMLElement): Promise<void> {
       mainPlot.height / 2,
     );
     ctx.textAlign = "start";
+    mainPlot.warning(warning);
   }
 
-  function drawMain(res: GPResult): void {
+  function drawMain(res: GPResult, warning: string): void {
     mainPlot = baseMain();
     const lo = res.bandMean.map((m, i) => m - 2 * res.bandStd[i]);
     const hi = res.bandMean.map((m, i) => m + 2 * res.bandStd[i]);
@@ -328,6 +329,7 @@ export async function mountGP(el: HTMLElement): Promise<void> {
       4,
     );
     mainPlot.axes();
+    mainPlot.warning(warning);
   }
 
   function clearPanels(): void {

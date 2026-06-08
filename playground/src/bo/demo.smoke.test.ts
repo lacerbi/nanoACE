@@ -41,14 +41,13 @@ describe("BO demo UI smoke", () => {
     await mountBO(el);
 
     expect(el.querySelector(".bo-main")).not.toBeNull();
-    const banner = el.querySelector<HTMLDivElement>(".bo-banner")!;
-    expect(banner.hidden).toBe(true);
+    expect(el.querySelector(".bo-banner")).toBeNull();
 
     el.querySelector<HTMLInputElement>(".pin-x")!.click();
     el.querySelector<HTMLInputElement>(".pin-y")!.click();
     expect(el.querySelector(".bo-main")).not.toBeNull();
 
     el.querySelector<HTMLButtonElement>(".clear")!.click();
-    expect(banner.hidden).toBe(false);
+    expect(el.querySelector(".bo-main")).not.toBeNull();
   });
 });

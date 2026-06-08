@@ -17,6 +17,39 @@ function setupTabs(): void {
   }
 }
 
+function setupFullscreenToggle(): void {
+  const btn = document.querySelector<HTMLButtonElement>(".fullscreen-toggle");
+  if (!btn) return;
+
+  const canFullscreen =
+    typeof document.documentElement.requestFullscreen === "function" &&
+    typeof document.exitFullscreen === "function";
+  if (!canFullscreen) {
+    btn.disabled = true;
+    btn.textContent = "Fullscreen unavailable";
+    return;
+  }
+
+  const update = () => {
+    const active = Boolean(document.fullscreenElement);
+    btn.textContent = active ? "Exit full screen" : "Full screen";
+    btn.setAttribute("aria-pressed", String(active));
+  };
+
+  btn.addEventListener("click", () => {
+    void (async () => {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await document.documentElement.requestFullscreen();
+      } catch {
+        update();
+      }
+    })();
+  });
+  document.addEventListener("fullscreenchange", update);
+  update();
+}
+
 async function mount(): Promise<void> {
   const gpEl = document.getElementById("gp");
   const gaussianEl = document.getElementById("gaussian");
@@ -57,4 +90,5 @@ async function mount(): Promise<void> {
 }
 
 setupTabs();
+setupFullscreenToggle();
 void mount();

@@ -19,8 +19,6 @@ import { analyticPosterior, betaLogPriorOnGrid, predictiveDensity } from "./orac
 const CSS = `
 .ga-root { display: flex; flex-direction: column; gap: 12px; }
 .ga-hint { color: var(--muted); margin: 0; }
-.ga-banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #fed7aa;
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .ga-top { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
 .ga-main { border: 1px solid var(--line); border-radius: 8px; background: #fff; touch-action: none; }
 .ga-controls { display: flex; flex-direction: column; gap: 12px; min-width: 260px; }
@@ -33,8 +31,9 @@ const CSS = `
 .ga-panels { display: flex; gap: 18px; flex-wrap: wrap; }
 .ga-panel { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 6px; }
 .ga-panel h4 { margin: 2px 6px 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.ga-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .ga-btn { font: inherit; padding: 6px 10px; border: 1px solid var(--line); background: #fff;
-  border-radius: 6px; cursor: pointer; align-self: flex-start; }
+  border-radius: 6px; cursor: pointer; }
 .ga-legend { font-size: 11px; color: var(--muted); display: flex; gap: 12px; padding: 0 6px; }
 .ga-legend span::before { content: "■ "; }
 `;
@@ -70,7 +69,8 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
   };
 
   // --- state (priors stored as native mean + concentration nu) ---
-  const yObs: number[] = [0.6, 0.85, -0.1, 1.0];
+  const defaultYObs = [0.6, 0.85, -0.1, 1.0];
+  const yObs: number[] = defaultYObs.slice();
   let muMean = 0.5 * (muRange[0] + muRange[1]);
   let lsMean = 0.5 * (lsRange[0] + lsRange[1]);
   let muNu = 2;
@@ -86,7 +86,6 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
   root.innerHTML = `
     <p class="ga-hint">Click the top panel to add an observation (its value is the x-position) ·
       drag to move · shift-click to delete. Set Beta priors below and watch ACE track the oracle.</p>
-    <div class="ga-banner" hidden></div>
     <div class="ga-legend"><span style="color:${COL.ace}">ACE</span>
       <span style="color:${COL.oracle}">oracle</span>
       <span style="color:${COL.prior}">prior</span></div>
@@ -103,7 +102,11 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
           <div class="ga-row"><label>mean</label><input type="range" class="ls-mean"/><span class="val ls-mean-v"></span></div>
           <div class="ga-row"><label>conc.</label><input type="range" class="ls-nu"/><span class="val ls-nu-v"></span></div>
         </fieldset>
-        <button class="ga-btn clear">Clear observations</button>
+        <div class="ga-btns">
+          <button class="ga-btn reset">Reset observations</button>
+          <button class="ga-btn clear">Clear observations</button>
+          <button class="ga-btn uniform">Uniform priors</button>
+        </div>
       </div>
     </div>
     <div class="ga-panels">
@@ -115,7 +118,6 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
   `;
   el.appendChild(root);
 
-  const banner = root.querySelector<HTMLDivElement>(".ga-banner")!;
   const mainCanvas = root.querySelector<HTMLCanvasElement>(".ga-main")!;
   const muCanvas = root.querySelector<HTMLCanvasElement>(".ga-mu")!;
   const lsCanvas = root.querySelector<HTMLCanvasElement>(".ga-ls")!;
@@ -156,8 +158,24 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
     lsNu = Math.exp(parseFloat(lsNuS.value));
     render();
   });
+  root.querySelector<HTMLButtonElement>(".reset")!.addEventListener("click", () => {
+    yObs.length = 0;
+    yObs.push(...defaultYObs);
+    render();
+  });
   root.querySelector<HTMLButtonElement>(".clear")!.addEventListener("click", () => {
     yObs.length = 0;
+    render();
+  });
+  root.querySelector<HTMLButtonElement>(".uniform")!.addEventListener("click", () => {
+    muMean = 0.5 * (muRange[0] + muRange[1]);
+    lsMean = 0.5 * (lsRange[0] + lsRange[1]);
+    muNu = 2;
+    lsNu = 2;
+    muMeanS.value = String(muMean);
+    lsMeanS.value = String(lsMean);
+    muNuS.value = String(Math.log(muNu));
+    lsNuS.value = String(Math.log(lsNu));
     render();
   });
 
@@ -214,8 +232,7 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
     const lsUnit = clampBetaUnit((lsMean - lsRange[0]) / (lsRange[1] - lsRange[0]));
 
     const nFar = yObs.filter((y) => Math.abs(y) > GAUSSIAN.Y_OOD).length;
-    banner.hidden = nFar === 0;
-    banner.textContent = nFar ? `⚠ ${nFar} observation(s) beyond training y-range (|y| > ${GAUSSIAN.Y_OOD})` : "";
+    const warning = nFar ? `${nFar} observation(s) beyond training y-range (|y| > ${GAUSSIAN.Y_OOD})` : "";
 
     const params = { yObs, muUnit, muNu, lsUnit, lsNu };
     const ace = gaussInfer(model, params, grids);
@@ -225,12 +242,12 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
     const priorMu = normalize(betaLogPriorOnGrid(grids.muGrid, muUnit, muNu, muRange[0], muRange[1]));
     const priorLs = normalize(betaLogPriorOnGrid(grids.lsGrid, lsUnit, lsNu, lsRange[0], lsRange[1]));
 
-    drawPredictive(ace.predDensity, predOracle);
+    drawPredictive(ace.predDensity, predOracle, warning);
     drawMarginal(muCanvas, muRange, grids.muGrid, oracle.muPost, ace.muPost, priorMu);
     drawMarginal(lsCanvas, lsRange, grids.lsGrid, oracle.lsPost, ace.lsPost, priorLs);
   }
 
-  function drawPredictive(ace: number[], oracle: number[]): void {
+  function drawPredictive(ace: number[], oracle: number[], warning: string): void {
     const top = Math.max(...ace, ...oracle, 1e-6) * 1.1;
     mainPlot = makePlot(mainCanvas, { xDomain: GAUSSIAN.Y_VIEW, yDomain: [0, top] });
     mainPlot.clear();
@@ -251,6 +268,7 @@ export async function mountGaussian(el: HTMLElement): Promise<void> {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "11px system-ui";
     ctx.fillText("posterior predictive p(new y)", 44, 14);
+    mainPlot.warning(warning);
   }
 
   function drawMarginal(

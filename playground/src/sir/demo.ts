@@ -18,8 +18,6 @@ import { buildSirOracleCache, integrateSirAtTimes, sirOracle } from "./oracle";
 const CSS = `
 .sir-root { display: flex; flex-direction: column; gap: 12px; }
 .sir-hint { color: var(--muted); margin: 0; }
-.sir-banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #fed7aa;
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .sir-legend { font-size: 11px; color: var(--muted); display: flex; gap: 12px; padding: 0 6px; }
 .sir-legend span::before { content: "■ "; }
 .sir-top { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
@@ -95,7 +93,6 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
   root.innerHTML = `
     <p class="sir-hint">Click the curve panel to add an observation · drag to move · shift-click to delete.
       The oracle is a live beta/gamma grid over deterministic SIR trajectories.</p>
-    <div class="sir-banner" hidden></div>
     <div class="sir-legend"><span style="color:${COL.ace}">ACE</span>
       <span style="color:${COL.oracle}">oracle</span>
       <span style="color:${COL.prior}">prior</span></div>
@@ -113,8 +110,9 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
           <div class="sir-row"><label>conc.</label><input type="range" class="gamma-nu"/><span class="val gamma-nu-v"></span></div>
         </fieldset>
         <div class="sir-btns">
-          <button class="sir-btn reset">Reset case</button>
+          <button class="sir-btn reset">Reset observations</button>
           <button class="sir-btn clear">Clear observations</button>
+          <button class="sir-btn uniform">Uniform priors</button>
         </div>
       </div>
     </div>
@@ -127,7 +125,6 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
   `;
   el.appendChild(root);
 
-  const banner = root.querySelector<HTMLDivElement>(".sir-banner")!;
   const mainCanvas = root.querySelector<HTMLCanvasElement>(".sir-main")!;
   const betaCanvas = root.querySelector<HTMLCanvasElement>(".sir-beta")!;
   const gammaCanvas = root.querySelector<HTMLCanvasElement>(".sir-gamma")!;
@@ -173,6 +170,17 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
   });
   root.querySelector<HTMLButtonElement>(".clear")!.addEventListener("click", () => {
     observations.length = 0;
+    render();
+  });
+  root.querySelector<HTMLButtonElement>(".uniform")!.addEventListener("click", () => {
+    betaMean = 0.5 * (betaRange[0] + betaRange[1]);
+    gammaMean = 0.5 * (gammaRange[0] + gammaRange[1]);
+    betaNu = 2;
+    gammaNu = 2;
+    betaMeanS.value = String(betaMean);
+    gammaMeanS.value = String(gammaMean);
+    betaNuS.value = String(Math.log(betaNu));
+    gammaNuS.value = String(Math.log(gammaNu));
     render();
   });
 
@@ -238,8 +246,7 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
       reasons.push(`${observations.length} observations (training used <= ${SIR.MAX_CONTEXT_HINT})`);
     if (observations.length > 0 && observations.length < SIR.MIN_CONTEXT_HINT)
       reasons.push(`${observations.length} observations (training used at least ${SIR.MIN_CONTEXT_HINT})`);
-    banner.hidden = reasons.length === 0;
-    banner.textContent = reasons.length ? `Out of training distribution: ${reasons.join(" · ")}` : "";
+    const warning = reasons.length ? `Out of training distribution: ${reasons.join(" / ")}` : "";
 
     const ace = sirInfer(model, params, grids);
     const oracle = sirOracle(params, grids, oracleCache, { betaRange, gammaRange, sigmaObs: SIR.SIGMA_OBS });
@@ -248,7 +255,7 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
       betaLogPriorOnGrid(grids.gammaGrid, gammaUnit, gammaNu, gammaRange[0], gammaRange[1]),
     );
 
-    drawMain(ace.predMean, ace.predStd, oracle.yMean, oracle.yStd);
+    drawMain(ace.predMean, ace.predStd, oracle.yMean, oracle.yStd, warning);
     drawMarginal(betaCanvas, betaRange, grids.betaGrid, oracle.betaPost, ace.betaPost, betaPrior);
     drawMarginal(gammaCanvas, gammaRange, grids.gammaGrid, oracle.gammaPost, ace.gammaPost, gammaPrior);
   }
@@ -261,7 +268,13 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
     return p;
   }
 
-  function drawMain(aceMean: number[], aceStd: number[], oracleMean: number[], oracleStd: number[]): void {
+  function drawMain(
+    aceMean: number[],
+    aceStd: number[],
+    oracleMean: number[],
+    oracleStd: number[],
+    warning: string,
+  ): void {
     mainPlot = baseMain();
     mainPlot.band(
       grids.tGrid,
@@ -296,6 +309,7 @@ export async function mountSIR(el: HTMLElement): Promise<void> {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "11px system-ui";
     ctx.fillText("infected fraction over time", 44, 14);
+    mainPlot.warning(warning);
   }
 
   function drawMarginal(

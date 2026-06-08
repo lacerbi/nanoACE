@@ -25,6 +25,7 @@ export interface Plot {
   vline(x: number, style: string, width?: number, dash?: number[]): void;
   hline(y: number, style: string, width?: number, dash?: number[]): void;
   axes(style?: string): void;
+  warning(text: string): void;
 }
 
 export function makePlot(canvas: HTMLCanvasElement, opts: PlotOpts): Plot {
@@ -128,6 +129,38 @@ export function makePlot(canvas: HTMLCanvasElement, opts: PlotOpts): Plot {
       ctx.strokeStyle = style;
       ctx.lineWidth = 1;
       ctx.strokeRect(pad.l, pad.t, plotW, plotH);
+    },
+    warning(text) {
+      if (!text) return;
+      const margin = 8;
+      const h = 24;
+      const x = pad.l + margin;
+      const y = pad.t + plotH - h - margin;
+      const w = Math.max(0, plotW - 2 * margin);
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 247, 237, 0.72)";
+      ctx.strokeStyle = "rgba(253, 186, 116, 0.85)";
+      ctx.lineWidth = 1;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+
+      ctx.fillStyle = "#b45309";
+      ctx.font = "12px system-ui";
+      ctx.textBaseline = "middle";
+      let label = text;
+      const maxTextW = Math.max(0, w - 16);
+      const textWidth = (s: string) => {
+        const measured = ctx.measureText(s);
+        return measured && Number.isFinite(measured.width) ? measured.width : s.length * 7;
+      };
+      if (textWidth(label) > maxTextW) {
+        while (label.length > 1 && textWidth(`${label}...`) > maxTextW) {
+          label = label.slice(0, -1);
+        }
+        label = `${label}...`;
+      }
+      ctx.fillText(label, x + 8, y + h / 2);
+      ctx.restore();
     },
   };
   return plot;

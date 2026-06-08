@@ -19,8 +19,6 @@ import { boInfer, defaultBOGrids, type BOPoint, type BOResult } from "./infer";
 const CSS = `
 .bo-root { display: flex; flex-direction: column; gap: 12px; }
 .bo-hint { color: var(--muted); margin: 0; }
-.bo-banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #fed7aa;
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .bo-legend { font-size: 11px; color: var(--muted); display: flex; gap: 12px; padding: 0 6px; flex-wrap: wrap; }
 .bo-legend span::before { content: ""; }
 .bo-top { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
@@ -91,7 +89,6 @@ export async function mountBO(el: HTMLElement): Promise<void> {
   root.innerHTML = `
     <p class="bo-hint">Click empty space to add an observation &middot; drag a point to move it &middot; shift-click to delete.
       Optimum-location and optimum-value posteriors are overlaid on the function plot.</p>
-    <div class="bo-banner" hidden></div>
     <div class="bo-legend"><span style="color:${COL.band}">predictive</span>
       <span style="color:${COL.xPost}">x_opt posterior</span>
       <span style="color:${COL.yPost}">y_opt posterior</span>
@@ -121,7 +118,6 @@ export async function mountBO(el: HTMLElement): Promise<void> {
   `;
   el.appendChild(root);
 
-  const banner = root.querySelector<HTMLDivElement>(".bo-banner")!;
   const mainCanvas = root.querySelector<HTMLCanvasElement>(".bo-main")!;
   const pinXEl = root.querySelector<HTMLInputElement>(".pin-x")!;
   const pinYEl = root.querySelector<HTMLInputElement>(".pin-y")!;
@@ -242,8 +238,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
       minPoints: BO.MIN_CONTEXT_HINT,
       minReason: (n) => `${n} observations (training used at least ${BO.MIN_CONTEXT_HINT})`,
     });
-    banner.hidden = reasons.length === 0;
-    banner.textContent = reasons.length ? `Out of training distribution: ${reasons.join(" / ")}` : "";
+    const warning = reasons.length ? `Out of training distribution: ${reasons.join(" / ")}` : "";
 
     const xUnit = clampBetaUnit((xMean - xRange[0]) / (xRange[1] - xRange[0]));
     const yUnit = clampBetaUnit((yMean - yOptRange[0]) / (yOptRange[1] - yOptRange[0]));
@@ -259,7 +254,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
 
     const xPrior = pinX ? null : normalize(betaLogPriorOnGrid(grids.xOptGrid, xUnit, xNu, xRange[0], xRange[1]));
     const yPrior = pinY ? null : normalize(betaLogPriorOnGrid(grids.yOptGrid, yUnit, yNu, yOptRange[0], yOptRange[1]));
-    drawMain(res, xPrior, yPrior);
+    drawMain(res, xPrior, yPrior, warning);
   }
 
   function baseMain(): Plot {
@@ -307,7 +302,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
     ctx.stroke();
   }
 
-  function drawMain(res: BOResult, xPrior: number[] | null, yPrior: number[] | null): void {
+  function drawMain(res: BOResult, xPrior: number[] | null, yPrior: number[] | null, warning: string): void {
     mainPlot = baseMain();
     const lo = res.bandMean.map((m, i) => m - 2 * res.bandStd[i]);
     const hi = res.bandMean.map((m, i) => m + 2 * res.bandStd[i]);
@@ -337,6 +332,7 @@ export async function mountBO(el: HTMLElement): Promise<void> {
     ctx.fillStyle = "#9ca3af";
     ctx.font = "11px system-ui";
     ctx.fillText("observations and optimum posteriors", 44, 14);
+    mainPlot.warning(warning);
   }
 
   render();
