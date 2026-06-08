@@ -3,12 +3,9 @@ name: Deploy playground to GitHub Pages
 # Manual-only for now (no auto-deploy on push). Run from the Actions tab.
 # Prerequisite: Settings -> Pages -> Build and deployment -> Source = GitHub Actions.
 #
-# PENDING: weight blobs (playground/public/models/) are gitignored while the
-# hosting decision is parked. The build job fails fast unless those files are
-# present, so a manual dispatch cannot publish a weightless demo by accident.
-# Resolve the hosting decision first (commit blobs / Git LFS / runtime fetch);
-# the checkpoints aren't in the repo, so generating weights in CI is not
-# currently possible.
+# Model weights live in a separate repository so normal nanoACE clones stay lean.
+# The workflow checks out that repository into playground/public/models before
+# building, then fails fast if any expected model blob is absent.
 on:
   workflow_dispatch:
 
@@ -30,6 +27,11 @@ jobs:
         working-directory: playground
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout playground model weights
+        uses: actions/checkout@v4
+        with:
+          repository: lacerbi/nanoACE-playground-weights
+          path: playground/public/models
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -39,10 +41,14 @@ jobs:
       - name: Require generated model weights
         run: |
           for file in \
+            public/models/bo1d/manifest.json \
+            public/models/bo1d/weights.bin \
             public/models/gp1d/manifest.json \
             public/models/gp1d/weights.bin \
             public/models/gaussian/manifest.json \
-            public/models/gaussian/weights.bin
+            public/models/gaussian/weights.bin \
+            public/models/sbi_sir/manifest.json \
+            public/models/sbi_sir/weights.bin
           do
             if [ ! -f "$file" ]; then
               echo "::error::Missing $file. Resolve playground weight hosting before deploying Pages."

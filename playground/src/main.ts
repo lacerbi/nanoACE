@@ -50,6 +50,34 @@ function setupFullscreenToggle(): void {
   update();
 }
 
+function setupAceInfoModal(): void {
+  const openBtn = document.querySelector<HTMLButtonElement>(".ace-info-toggle");
+  const modal = document.getElementById("ace-modal");
+  const closeBtn = document.querySelector<HTMLButtonElement>(".ace-modal-close");
+  if (!openBtn || !modal || !closeBtn) return;
+
+  const close = () => {
+    modal.hidden = true;
+    openBtn.setAttribute("aria-expanded", "false");
+    openBtn.focus();
+  };
+
+  const open = () => {
+    modal.hidden = false;
+    openBtn.setAttribute("aria-expanded", "true");
+    closeBtn.focus();
+  };
+
+  openBtn.addEventListener("click", open);
+  closeBtn.addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) close();
+  });
+}
+
 async function mount(): Promise<void> {
   const gpEl = document.getElementById("gp");
   const gaussianEl = document.getElementById("gaussian");
@@ -91,4 +119,5 @@ async function mount(): Promise<void> {
 
 setupTabs();
 setupFullscreenToggle();
+setupAceInfoModal();
 void mount();
