@@ -366,11 +366,7 @@ def draw_pool(n_instances: int) -> dict[str, torch.Tensor]:
 
 
 def load_checkpoint(path: str | Path, device: torch.device) -> ACE:
-    """Load a GP-1D checkpoint (2-arg wrapper over `train.load_checkpoint`).
-
-    Kept at this 2-arg signature because `playground/export_weights.py` and
-    `playground/parity.py` call `gp1d.load_checkpoint(path, device)` directly.
-    """
+    """Load a GP-1D checkpoint using this task's variable schema."""
 
     return train.load_checkpoint(path, device, variables())
 
@@ -704,6 +700,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--jitter", type=float, default=GEN_JITTER)
     p.add_argument("--pool", default="", help="train from an offline data.py pool directory instead of online")
     p.add_argument("--pool-force", action="store_true", help="reuse a pool despite a DGP config-hash mismatch")
+    p.add_argument("--pool-cache-shards", type=int, default=4, help="loaded pool shards to keep in RAM")
+    p.add_argument("--pool-prefetch-batches", type=int, default=1, help="future pooled batches to prefetch")
     return train.apply_config_file(p)
 
 
@@ -746,6 +744,8 @@ def main() -> None:
                 latent_context_prob=args.latent_context_prob,
                 device=device,
                 force=args.pool_force,
+                cache_shards=args.pool_cache_shards,
+                prefetch_batches=args.pool_prefetch_batches,
             )
         else:
             source = lambda step: online_batch(model, args, device)

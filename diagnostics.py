@@ -1,12 +1,12 @@
-"""Reusable diagnostic queries for ACE scalar examples.
+"""Reusable diagnostic queries for scalar ACE tasks.
 
-The examples compare ACE's one-dimensional predictive distributions against
+Callers can compare ACE's one-dimensional predictive distributions against
 analytic or numerical references by evaluating target tokens over fixed grids.
 This module provides the shared plumbing: scalar token construction, context
 repetition for batched grid queries, conditional one-variable queries, a
 symmetrized two-variable autoregressive joint density, and simple grid moments.
 
-All log densities returned here are in ACE token coordinates. Example files are
+All log densities returned here are in ACE token coordinates. Callers are
 responsible for encoding bounded latent grids before querying and decoding
 moments or plots back to native coordinates when needed.
 """
@@ -29,7 +29,7 @@ def make_scalar_tokens(
     mask: torch.Tensor,
     x_dim: int,
 ) -> Tokens:
-    """Construct tokens for scalar examples with zero covariates."""
+    """Construct scalar tokens with zero covariates."""
 
     b, t = var_id.shape
     return Tokens(

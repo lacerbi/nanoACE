@@ -2,11 +2,11 @@
 
 Model-side PRIOR token semantics live in `ace.py`: tokens have a mode, a fixed
 two-feature prior payload, and an embedder path. This module is narrower: it
-implements the Beta-family math used by the current ACEP examples. Finite spread
+implements the Beta-family math for ACEP-style bounded latent priors. Finite spread
 encodes a Beta prior over a bounded continuous latent; zero spread encodes an
-exact known latent value. The Gaussian, SIR, and BO examples use these helpers
-to sample prior hyperparameters, draw latent truths, build information tokens,
-and score prior densities on diagnostic grids.
+exact known latent value. Callers use these helpers to sample prior hyperparameters,
+draw latent truths, build information tokens, and score prior densities on diagnostic
+grids.
 
 Three coordinate spaces appear here:
 

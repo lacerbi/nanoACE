@@ -115,7 +115,7 @@ def sample_toy_batch(
     # (sample_reveal_mask: prob q reveal nothing, else mixed uniform-subset /
     # uniform-count). A revealed latent collapses its always-present Beta prior token
     # to a zero-spread exact value; a non-revealed latent keeps its Beta prior and is
-    # queried. See ace.sample_reveal_mask and DEVLOG "shared reveal strategy".
+    # queried. The reveal distribution is implemented in ace.sample_reveal_mask.
     reveal_mask = sample_reveal_mask(2, batch_size, q=1.0 - latent_context_prob, device=device)
     reveal_mu = reveal_mask[:, 0]
     reveal_logsig = reveal_mask[:, 1]
@@ -266,11 +266,7 @@ def predictive_grid(
 
 
 def load_checkpoint(path: str | Path, device: torch.device) -> ACE:
-    """Load a Gaussian example checkpoint (2-arg wrapper over `train.load_checkpoint`).
-
-    Kept at this 2-arg signature because `playground/export_weights.py` and
-    `playground/parity.py` call `gaussian_toy.load_checkpoint(path, device)` directly.
-    """
+    """Load a Gaussian checkpoint using this task's variable schema."""
 
     return train.load_checkpoint(path, device, variables())
 

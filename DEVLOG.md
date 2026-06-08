@@ -76,8 +76,11 @@ extraction entry.
     `latent_context_prob`. The CLI DGP-constant flags (`--jitter`, BO `--sigma-obs`/
     `--sigma-f-max`/`--prior-uniform-mix`) are wired to the same `GEN_*` constants
     `gen_config()` reports, so online and pool share one source of truth.
-  - **Simplification.** `PoolReader` loads the whole pool into RAM (shard files remain the
-    on-disk artifact); streaming shards to scale past RAM is a deliberate non-goal.
+  - **Read-side memory.** `PoolReader` keeps only the manifest in memory at construction,
+    maps each logical batch to touched `(shard, row)` pairs, lazy-loads shards through a
+    bounded LRU cache, and uses a one-thread prefetcher for upcoming batch shards. Sharded
+    pools therefore scale by shard size plus the cache and in-flight prefetch windows, not
+    by full `pool_size`.
 
 ---
 
@@ -135,14 +138,13 @@ Full plan and verification log: [docs/plans/PLAN-train-loop-extraction.md](docs/
   `train.py` exposes plain functions — `common_parser()`, `build_model(args, variables,
   device)`, `TrainConfig`, `fit(model, sample_batch, cfg, ...)`, the checkpoint helpers —
   not a `Task`/registry/config framework.
-- **`fit` takes a `() -> Batch` thunk.** Each example passes
-  `lambda: sample_X(...).batch`. The same interface lets a future sharded `data.py`
-  reader drop in with no second code path — so `data.py` stays **deferred** (no GP/BO
-  pooled run has made online Cholesky the bottleneck yet).
-- **No prefetch, documented in code.** `fit` reads one batch per step synchronously; the
-  expensive work (Cholesky) is inside the thunk, not a separate producer, so there is
-  nothing to prefetch. The rationale the old "Training / ops" entry asked for now has a
-  home (a module docstring note in `train.py`).
+- **`fit` takes a sampler thunk.** This entry originally introduced a `() -> Batch`
+  extraction; the current interface is `(step) -> Batch` after the offline-pool work above.
+  The important retained decision is still one training path: examples pass online samplers,
+  and `data.py`'s `PoolReader` satisfies the same interface.
+- **No generic training prefetcher.** `fit` reads one batch per step synchronously. The
+  optional offline path owns its shard-level lazy loading and prefetching inside
+  `PoolReader`, where the deterministic pool schedule is available.
 - **Cosine LR is the new default** (`--lr-schedule {cosine,constant}`, `--warmup`). This
   changes future *from-scratch retrains* vs the retained constant-LR artifacts — fine,
   artifacts are regenerable, and `--lr-schedule constant` exactly reproduces the old loop
@@ -888,11 +890,10 @@ example.
 - **Keep:** checkpoint + simple resume; cosine LR; Adam; grad clip; GPU model with a
   **CPU float64 data/oracle split** (Cholesky on the Win/WSL2 GPU path can trip the host
   watchdog).
-- **Drop prefetch.** Generate→save moved the expensive Cholesky *off* the training loop
-  (it now runs once, in the save step), so prefetch no longer earns its keep. `train.py`
-  reads shards synchronously. **Leave a code comment** explaining this, so the absence
-  reads as a decision, not an oversight. (If the GPU ever starves on H2D, add
-  pinned-memory + a copy stream as a later, local change.)
+- **No generic training-loop prefetcher.** Generate→save moved the expensive Cholesky
+  *off* the training loop, so `train.py` stays synchronous. The concrete `PoolReader`
+  may still lazy-load and prefetch shard files because the deterministic pool schedule
+  tells it exactly which shards upcoming batches will need.
 - **Cut entirely (large experiment management):** Slurm/HPC layer; finite-pool caching machinery
   beyond the simple sharded save (manifest, DGP-hash fingerprint, shuffle enum);
   multi-axis resume-provenance guards; schema-migration `reeval`; mechanistic

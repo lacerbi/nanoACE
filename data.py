@@ -1,12 +1,20 @@
-"""Offline sharded data pool for the expensive examples (generate -> save -> train).
+"""Offline sharded data pools (generate -> save -> train).
 
-This is the optional offline counterpart to the examples' online samplers. It exists
-for GP-1D and BO, whose per-instance physics (GP Cholesky / Matheron planting) is the
-expensive part worth caching; Gaussian and SIR are cheap and stay online-only.
+A caller that wants an offline pool provides:
 
-Design (see docs/plans/PLAN-offline-data-and-reseed.md):
+- `draw_fn(n) -> dict[str, Tensor]`: draw `n` stored instances as a struct of arrays;
+- `assemble(inst, variables, n_context, reveal_mask, max_context, device) -> Batch`:
+  turn stored rows plus read-time split decisions into a training batch;
+- `variables()` and `gen_config()`: the token schema and DGP constants recorded in the
+  manifest.
 
-- **Cache only the expensive physics draws.** A pool stores exactly what an example's
+`write_pool` writes `draw_fn` outputs into `.pt` shards plus a manifest. `PoolReader`
+loads the manifest, reads touched shard rows, recomputes `n_context` and latent reveal
+masks from `(seed, position)`, and returns a `(step) -> Batch` callable for `train.fit`.
+
+Design:
+
+- **Cache only the expensive draws.** A pool stores exactly what the caller's
   `draw_instances` produces (a struct-of-arrays per shard), nothing about the
   context/target split or the reveal mask -- those are recomputed at read time, so the
   reveal strategy can change without regenerating the pool.
@@ -22,14 +30,17 @@ Design (see docs/plans/PLAN-offline-data-and-reseed.md):
   a wrong schema silently misreads the arrays) and a `sha256` of the DGP `gen_config`
   (forceable with `force=True`). This replaces the heavy multi-axis resume-guard matrix.
 
-Simplification: `PoolReader` loads the whole pool into RAM at construction (the shard
-files remain the on-disk, inspectable artifact). nanoACE pools fit comfortably; streaming
-shards to scale past RAM is a deliberate non-goal here.
+- **Bounded read-side memory.** `PoolReader` keeps the manifest in memory, lazily loads only
+  the shards touched by a batch, caches a bounded number of shards, and asynchronously
+  prefetches shards for upcoming batches. Memory scales with shard size plus the cache and
+  in-flight prefetch windows, not with the full pool size.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import OrderedDict
+from concurrent.futures import Future, ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
@@ -119,8 +130,8 @@ def write_pool(
 ) -> dict:
     """Generate a sharded finite pool of drawn instances.
 
-    `draw_fn(n) -> dict[str, Tensor]` returns one example's CPU-native struct-of-arrays for
-    `n` instances (the example's `draw_instances` bound to its frozen DGP config). Shard `i`
+    `draw_fn(n) -> dict[str, Tensor]` returns CPU-native struct-of-arrays for `n`
+    instances. Shard `i`
     is produced after `torch.manual_seed(mix_seed(seed, i))`, so a partial build resumes
     deterministically (valid existing shards are skipped). Shards are written atomically
     (temp -> rename); the manifest is written **last**, so "manifest exists => pool complete".
@@ -186,13 +197,15 @@ def write_pool(
 
 
 class PoolReader:
-    """Read a pool as a `sample_batch(step) -> Batch` thunk for `fit`.
+    """Read a pool as a `sample_batch(step) -> Batch` callable for `fit`.
 
     Validates the manifest on construction: schema and `variables()` are hard gates (a wrong
     token schema would silently misread the cached arrays); a `gen_config` config-hash
     mismatch is refused unless `force=True` (a knowing reuse under changed DGP constants).
     `max_context < N_TOTAL` is required (at least one target). Splits and the "both" shuffle
-    are stateless functions of `(seed, p)` with `p = (step - 1) * B + j`.
+    are stateless functions of `(seed, p)` with `p = (step - 1) * B + j`. Shards are loaded
+    lazily through a bounded LRU cache, and a one-thread prefetcher can queue upcoming
+    batch shards because the schedule is deterministic.
     """
 
     def __init__(
@@ -209,6 +222,8 @@ class PoolReader:
         latent_context_prob: float,
         device: torch.device | str,
         force: bool = False,
+        cache_shards: int = 4,
+        prefetch_batches: int = 1,
     ):
         self.dir = Path(path)
         self.manifest = json.loads((self.dir / "manifest.json").read_text(encoding="utf-8"))
@@ -236,6 +251,10 @@ class PoolReader:
             raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         if not 1 <= min_context <= max_context:
             raise ValueError(f"need 1 <= min_context ({min_context}) <= max_context ({max_context})")
+        if cache_shards < 1:
+            raise ValueError(f"cache_shards must be >= 1, got {cache_shards}")
+        if prefetch_batches < 0:
+            raise ValueError(f"prefetch_batches must be >= 0, got {prefetch_batches}")
 
         self.assemble = assemble
         self.variables = list(variables)
@@ -248,18 +267,30 @@ class PoolReader:
         self.pool_size = int(self.manifest["pool_size"])
         self.n_latents = sum(1 for v in self.variables if v.kind == "latent")
 
-        # Load the whole pool into RAM, concatenated in physical (shard) order.
-        self.shard_starts = [int(e["start"]) for e in self.manifest["shards"]]
-        self.shard_counts = [int(e["count"]) for e in self.manifest["shards"]]
-        field_names = [f["name"] for f in self.manifest["fields"]]
-        parts: dict[str, list[torch.Tensor]] = {k: [] for k in field_names}
-        for e in self.manifest["shards"]:
-            shard = torch.load(self.dir / e["file"], map_location="cpu", weights_only=False)
-            for k in field_names:
-                parts[k].append(shard[k])
-        self._fields = {k: torch.cat(v, dim=0) for k, v in parts.items()}
-        self._perm_pass: int | None = None
-        self._perm: torch.Tensor | None = None
+        self.shards = list(self.manifest["shards"])
+        self.shard_starts = [int(e["start"]) for e in self.shards]
+        self.shard_counts = [int(e["count"]) for e in self.shards]
+        if sum(self.shard_counts) != self.pool_size:
+            raise ValueError("pool manifest shard counts do not sum to pool_size")
+        self._shard_counts_t = torch.tensor(self.shard_counts, dtype=torch.int64)
+        self.field_names = [f["name"] for f in self.manifest["fields"]]
+        if not self.field_names:
+            raise ValueError("pool manifest has no fields")
+        self._field_meta = {f["name"]: f for f in self.manifest["fields"]}
+
+        self.cache_shards = int(cache_shards)
+        self.prefetch_batches = int(prefetch_batches)
+        self._cache: OrderedDict[int, dict[str, torch.Tensor]] = OrderedDict()
+        self._futures: dict[int, Future[dict[str, torch.Tensor]]] = {}
+        self._executor = (
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="nanoace-pool")
+            if self.prefetch_batches > 0 else None
+        )
+        self._closed = False
+        self._layout_pass: int | None = None
+        self._layout: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+        self._within_cache: OrderedDict[tuple[int, int], torch.Tensor] = OrderedDict()
+        self._prefetch_from(1)
 
     def _key(self, name: str, *ints: int) -> int:
         """Scalar splitmix-style key for `(seed, name, *ints)`, in `[0, 2**62)`."""
@@ -273,40 +304,152 @@ class PoolReader:
     def _index_perm(self, n: int, key: int) -> torch.Tensor:
         return mix_int64(torch.arange(n, dtype=torch.int64) + key).argsort()
 
-    def _pass_perm(self, p: int) -> torch.Tensor:
-        """Physical-row visiting order for pass `p`: shard-order + within-shard ("both")."""
+    def _pass_layout(self, p: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Shard order plus cumulative bounds for one pass, without materializing all rows."""
 
-        if self._perm_pass == p and self._perm is not None:
-            return self._perm
-        shard_order = self._index_perm(len(self.shard_starts), self._key("shard", p))
-        rows = []
-        for s in shard_order.tolist():
-            local = self._index_perm(self.shard_counts[s], self._key("within", p, s))
-            rows.append(self.shard_starts[s] + local)
-        self._perm_pass, self._perm = p, torch.cat(rows)
-        return self._perm
+        if self._layout_pass == p and self._layout is not None:
+            return self._layout
+        shard_order = self._index_perm(len(self.shards), self._key("shard", p))
+        counts = self._shard_counts_t.index_select(0, shard_order)
+        ends = torch.cumsum(counts, dim=0)
+        starts = ends - counts
+        self._layout_pass, self._layout = p, (shard_order, starts, ends)
+        return self._layout
 
-    def _physical_rows(self, pos: torch.Tensor) -> torch.Tensor:
-        """Map absolute logical positions to physical pool rows (per-pass "both" shuffle)."""
+    def _within_perm(self, p: int, shard_idx: int) -> torch.Tensor:
+        """Within-shard row order for one `(pass, shard)` pair."""
+
+        key = (int(p), int(shard_idx))
+        if key in self._within_cache:
+            self._within_cache.move_to_end(key)
+            return self._within_cache[key]
+        perm = self._index_perm(self.shard_counts[shard_idx], self._key("within", p, shard_idx))
+        self._within_cache[key] = perm
+        max_cached = max(1, self.cache_shards * 2)
+        while len(self._within_cache) > max_cached:
+            self._within_cache.popitem(last=False)
+        return perm
+
+    def _physical_locs(self, pos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Map absolute logical positions to `(shard_index, local_row)` under the "both" shuffle."""
 
         pass_idx = pos // self.pool_size
         pass_pos = pos % self.pool_size
-        out = torch.empty_like(pos)
+        out_shard = torch.empty_like(pos)
+        out_local = torch.empty_like(pos)
         for p in torch.unique(pass_idx).tolist():
             m = pass_idx == p
-            out[m] = self._pass_perm(int(p))[pass_pos[m]]
-        return out
+            pp = pass_pos[m]
+            shard_order, starts, ends = self._pass_layout(int(p))
+            order_pos = torch.searchsorted(ends, pp, right=True)
+            shard_idx = shard_order.index_select(0, order_pos)
+            within_pos = pp - starts.index_select(0, order_pos)
+            local = torch.empty_like(within_pos)
+            for s in torch.unique(shard_idx).tolist():
+                sm = shard_idx == s
+                local[sm] = self._within_perm(int(p), int(s)).index_select(0, within_pos[sm])
+            out_shard[m] = shard_idx
+            out_local[m] = local
+        return out_shard, out_local
+
+    def _expected_shard_meta(self, shard_idx: int) -> dict:
+        entry = self.shards[shard_idx]
+        return _shard_meta(
+            cfg_hash=self.manifest["config_hash"],
+            seed=int(self.manifest["seed"]),
+            shard_index=shard_idx,
+            start=int(entry["start"]),
+            count=int(entry["count"]),
+        )
+
+    def _load_shard_from_disk(self, shard_idx: int) -> dict[str, torch.Tensor]:
+        entry = self.shards[shard_idx]
+        path = self.dir / entry["file"]
+        shard = torch.load(path, map_location="cpu", weights_only=False)
+        if shard.get("__meta__") != self._expected_shard_meta(shard_idx):
+            raise ValueError(f"pool shard metadata mismatch in {path}; regenerate the pool")
+        got = {k for k in shard if k != "__meta__"}
+        want = set(self.field_names)
+        if got != want:
+            raise ValueError(f"pool shard field mismatch in {path}: got {sorted(got)}, want {sorted(want)}")
+        count = self.shard_counts[shard_idx]
+        for name in self.field_names:
+            tensor = shard[name]
+            meta = self._field_meta[name]
+            want_shape = [count] + list(meta["shape"])
+            got_dtype = str(tensor.dtype).replace("torch.", "")
+            if list(tensor.shape) != want_shape or got_dtype != meta["dtype"]:
+                raise ValueError(
+                    f"pool shard field {name!r} mismatch in {path}: "
+                    f"shape {list(tensor.shape)} dtype {got_dtype}, want {want_shape} {meta['dtype']}"
+                )
+        return {k: shard[k].contiguous() for k in self.field_names}
+
+    def _remember_shard(self, shard_idx: int, shard: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        self._cache[shard_idx] = shard
+        self._cache.move_to_end(shard_idx)
+        while len(self._cache) > self.cache_shards:
+            self._cache.popitem(last=False)
+        return shard
+
+    def _get_shard(self, shard_idx: int) -> dict[str, torch.Tensor]:
+        if shard_idx in self._cache:
+            self._cache.move_to_end(shard_idx)
+            return self._cache[shard_idx]
+        future = self._futures.pop(shard_idx, None)
+        shard = future.result() if future is not None else self._load_shard_from_disk(shard_idx)
+        return self._remember_shard(shard_idx, shard)
+
+    def _positions_for_step(self, step: int) -> torch.Tensor:
+        if step < 1:
+            raise ValueError(f"step must be >= 1, got {step}")
+        start = (int(step) - 1) * self.B
+        return torch.arange(start, start + self.B, dtype=torch.int64)
+
+    def _prefetch_step(self, step: int) -> None:
+        if self._executor is None or self._closed:
+            return
+        shard_idx, _ = self._physical_locs(self._positions_for_step(step))
+        for s in dict.fromkeys(int(x) for x in shard_idx.tolist()):
+            if s not in self._cache and s not in self._futures:
+                self._futures[s] = self._executor.submit(self._load_shard_from_disk, s)
+
+    def _prefetch_from(self, step: int) -> None:
+        for future_step in range(step, step + self.prefetch_batches):
+            self._prefetch_step(future_step)
+
+    def _gather(self, shard_idx: torch.Tensor, local_idx: torch.Tensor) -> dict[str, torch.Tensor]:
+        inst: dict[str, torch.Tensor] = {}
+        for s in torch.unique(shard_idx).tolist():
+            m = shard_idx == s
+            rows = local_idx[m]
+            out_rows = torch.nonzero(m, as_tuple=False).squeeze(1)
+            shard = self._get_shard(int(s))
+            for name in self.field_names:
+                vals = shard[name].index_select(0, rows)
+                if name not in inst:
+                    inst[name] = torch.empty((shard_idx.numel(),) + tuple(vals.shape[1:]), dtype=vals.dtype)
+                inst[name].index_copy_(0, out_rows, vals)
+        return inst
 
     def _n_context(self, pos: torch.Tensor) -> torch.Tensor:
         span = self.max_context - self.min_context + 1
         mixed = mix_int64(pos + self._key("nctx")) & ((1 << 62) - 1)
         return self.min_context + (mixed % span)
 
+    def close(self) -> None:
+        if self._executor is not None and not self._closed:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        self._closed = True
+
+    def __del__(self) -> None:
+        self.close()
+
     def __call__(self, step: int) -> Batch:
-        start = (int(step) - 1) * self.B
-        pos = torch.arange(start, start + self.B, dtype=torch.int64)
-        physical = self._physical_rows(pos)
-        inst = {k: v.index_select(0, physical) for k, v in self._fields.items()}
+        pos = self._positions_for_step(int(step))
+        shard_idx, local_idx = self._physical_locs(pos)
+        inst = self._gather(shard_idx, local_idx)
+        self._prefetch_from(int(step) + 1)
         n_context = self._n_context(pos).to(self.device)
         reveal = reveal_mask_from_index(pos + self._key("reveal"), self.n_latents, self.q).to(self.device)
         return self.assemble(
@@ -320,23 +463,23 @@ class PoolReader:
 
 
 # --------------------------------------------------------------------------- #
-# Build CLI: python data.py <example> --out DIR --pool-size N [...]
+# Build CLI: python data.py <task> --out DIR --pool-size N [...]
 # --------------------------------------------------------------------------- #
 
 
-def _example_module(name: str):
+def _task_module(name: str):
     if name == "gp1d":
         import gp1d as ex
     elif name == "bo1d":
         import bo1d as ex
     else:
-        raise SystemExit(f"unknown example {name!r}; choose gp1d or bo1d")
+        raise SystemExit(f"unknown task {name!r}; choose gp1d or bo1d")
     return ex
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Build a sharded finite training-data pool (generate -> save).")
-    p.add_argument("example", choices=("gp1d", "bo1d"))
+    p.add_argument("task", choices=("gp1d", "bo1d"))
     p.add_argument("--out", required=True, help="output pool directory")
     p.add_argument("--pool-size", type=int, required=True, help="number of instances in the finite pool")
     p.add_argument("--shard-size", type=int, default=8192, help="instances per shard")
@@ -344,8 +487,8 @@ def main() -> None:
     p.add_argument("--force", action="store_true", help="overwrite an existing complete pool")
     args = p.parse_args()
 
-    ex = _example_module(args.example)
-    print(f"== build {args.example} pool ==  out={args.out}  pool_size={args.pool_size}  shard_size={args.shard_size}")
+    ex = _task_module(args.task)
+    print(f"== build {args.task} pool ==  out={args.out}  pool_size={args.pool_size}  shard_size={args.shard_size}")
     write_pool(
         ex.draw_pool,
         args.out,

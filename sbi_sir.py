@@ -365,11 +365,7 @@ def sample_sir_batch(
 
 
 def load_checkpoint(path: str | Path, device: torch.device) -> ACE:
-    """Load an SIR checkpoint (2-arg wrapper over `train.load_checkpoint`).
-
-    Kept at this 2-arg signature because `playground/export_weights.py` and
-    `playground/parity.py` call `sbi_sir.load_checkpoint(path, device)` directly.
-    """
+    """Load an SIR checkpoint using this task's variable schema."""
 
     return train.load_checkpoint(path, device, variables())
 

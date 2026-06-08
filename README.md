@@ -49,8 +49,9 @@ Implemented modules:
   for the expensive examples (GP-1D, BO). `write_pool` caches only the per-instance
   physics; `PoolReader` reads it back through the same `assemble` the online path
   uses, recomputing the context/target split and reveal mask from a stateless
-  `(seed, position)` hash (batch-size-independent, resume-exact). A manifest carries
-  the `variables()` schema and a DGP config-hash as the staleness guard. Build with
+  `(seed, position)` hash (batch-size-independent, resume-exact). It lazy-loads shards
+  through a bounded cache and prefetches upcoming batch shards. A manifest carries the
+  `variables()` schema and a DGP config-hash as the staleness guard. Build with
   `python data.py <gp1d|bo1d> --out DIR --pool-size N`.
 - [gaussian_toy.py](gaussian_toy.py): Gaussian ACEP toy with two bounded
   continuous latents, runtime Beta information tokens, online
@@ -167,7 +168,10 @@ independent of batch size and the reveal strategy, and a pooled run is **resume-
 The manifest records the `variables()` schema (a hard compatibility gate) and a hash of
 the data-generating constants; training from a pool built under different DGP constants is
 refused unless you pass `--pool-force`. Pools live under gitignored `artifacts/`; size
-them so `steps * batch_size` is a few passes over `--pool-size`.
+them so `steps * batch_size` is a few passes over `--pool-size`. `PoolReader` does not
+load the full pool into RAM: it keeps a bounded shard cache (`--pool-cache-shards`,
+default 4) and prefetches upcoming batch shards (`--pool-prefetch-batches`, default 1;
+set to 0 to disable).
 
 ### Gaussian ACEP
 

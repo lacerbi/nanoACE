@@ -23,7 +23,7 @@ Phase 2b — complement-targets:
 - [x] verify: GP/BO run; `n_target∈[44,63]` exact; ctx≥1 (GP min1/BO min3); draw determinism max|dx|=0
 
 Phase 3 — data.py + --pool:
-- [x] `data.py`: `write_pool`, `PoolReader`, manifest+config_hash, "both" shuffle, splits, `__main__`
+- [x] `data.py`: `write_pool`, lazy/prefetching `PoolReader`, manifest+config_hash, "both" shuffle, splits, `__main__`
 - [x] `gp1d`/`bo1d`: `gen_config()`, `draw_pool()`, `--pool`/`--pool-force`, source wiring; CLI DGP defaults wired to `GEN_*`
 - [x] verify: build + interrupted-resume skip; pooled GP/BO train OK; B-independence (nctx/reveal/physical); pool resume-exact max|dW|=0; guards config/N_TOTAL/variables(hard-even-w/force); 4× online exit 0
 
@@ -74,7 +74,7 @@ checkpointed" caveat and the earlier "keep online bit-identical" intent.
     stream. Deferred; the user batches this separately. The retained checkpoints stay valid
     and loadable (only *training* changes); they merely stop being
     seed-reproducible-under-new-code until regenerated.
-  - RNG-state checkpointing; prefetch; the multi-axis resume-guard matrix;
+  - RNG-state checkpointing; a generic training-loop prefetcher; the multi-axis resume-guard matrix;
     HPC/Slurm; reeval; a shuffle-mode enum (all DEVLOG cut-list items). The
     single DGP config-hash is the one provenance check we keep.
   - SIR-style permutation splits (GP/BO points are iid uniform → only
@@ -222,7 +222,8 @@ splits are recomputed statelessly at read time.
     config_hash = sha256(canonical_json(gen_config + variables)), fields [{name, shape, dtype}],
     shards (file/start/count), pool_size, shard_size, seed}`.
   - `PoolReader(path, *, assemble, variables, batch_size, seed, max_context,
-    min_context, latent_context_prob, device, force=False)`: on load, validate **schema and
+    min_context, latent_context_prob, device, force=False, cache_shards=4,
+    prefetch_batches=1)`: on load, validate **schema and
     `variables()` (always hard — a wrong token schema silently misreads the cached arrays)**;
     validate the **config-hash** (the non-schema DGP constants) — refuse, or warn if `force`;
     validate `max_context < N_TOTAL` (always hard — need ≥1 target). Then `__call__(step)` →
@@ -237,6 +238,8 @@ splits are recomputed statelessly at read time.
       split streams are decorrelated. Seed enters as a **salt, not a `B`/`steps`-dependent
       offset** (the earlier `split_offset = seed*steps*B` is dropped: it broke
       batch-size/steps independence and was off-by-one against `fit`'s 1-based loop).
+    - load only the touched shards through a bounded LRU cache and prefetch upcoming batch
+      shards asynchronously; the full pool is not materialized in RAM.
     - return `assemble(rows, n_context=..., reveal_mask=..., max_context=max_context, device=device)`
       (targets = `N_TOTAL - n_context`).
   - `__main__`: `python data.py <example> --out DIR --pool-size N [--shard-size M

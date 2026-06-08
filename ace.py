@@ -158,7 +158,7 @@ def sample_reveal_mask(
 ) -> torch.Tensor:
     """Sample which latents are revealed as context per task: `bool[batch, n_latents]`.
 
-    Shared reveal/conditioning DGP for the example samplers. Per task:
+    Shared reveal/conditioning DGP for batch samplers. Per task:
 
     - with probability `q`, reveal *nothing* (pure inference / pure-prior);
     - otherwise split the revealing mass evenly between two schemes:
@@ -172,7 +172,7 @@ def sample_reveal_mask(
     (notably revealing *all* latents) from being starved as `n_latents` grows via
     the second. Conditioning on any subset of latents is therefore in-distribution.
 
-    Examples interpret a revealed latent per their own convention (e.g. an exact
+    Callers interpret a revealed latent per their own convention (e.g. an exact
     zero-spread token); a non-revealed latent is queried.
     """
 
@@ -269,7 +269,7 @@ def reveal_mask_from_index(idx: torch.Tensor, n_latents: int, q: float) -> torch
 class Tokens:
     """Padded token set.
 
-    `Tokens` is deliberately just tensors. This keeps examples free to construct
+    `Tokens` is deliberately just tensors. This keeps callers free to construct
     batches directly while the model sees one uniform representation. Data tokens
     use `x`; latent tokens set `x` to zeros. Continuous variables use `value`;
     bounded continuous latent values are in internal `[-1, 1]` coordinates.

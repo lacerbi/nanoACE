@@ -117,8 +117,9 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   `evaluate`, `plot_diagnostic`, and a 2-arg `load_checkpoint(path, device)` wrapper (the
   contract the playground calls). Checkpoints are `{cfg, seed, state_dict}` plus optional
   `config` provenance and optional `{optimizer, scheduler, step}` for resume — all
-  additive, so legacy files still load. No prefetch (synchronous online generation), by
-  design. `main()` is intentionally not centralized (examples stay readable end-to-end).
+  additive, so legacy files still load. `fit` itself stays synchronous; the optional
+  offline `PoolReader` owns shard-level prefetching. `main()` is intentionally not
+  centralized (examples stay readable end-to-end).
 
 ## Conventions and gotchas
 
@@ -145,7 +146,9 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   every non-context point is a target, `n_target = N_TOTAL - n_context`) and the reveal mask
   are recomputed at read time from a stateless `(seed, position)` hash, so batch size,
   `--steps`, and the reveal strategy can all change without regenerating. `N_TOTAL` counts
-  data points only; latent tokens are separate columns on top.
+  data points only; latent tokens are separate columns on top. `PoolReader` lazy-loads
+  touched shards through a bounded LRU cache and a one-thread prefetcher; it does not load
+  the full pool into RAM.
 - **Data values remain task-scaled.** Data values should generally be scaled around
   `[-1, 1]` at generation time. This is a soft convention, not clipping: Gaussian and
   GP samples can have stochastic tails outside that range, which may matter when reading
@@ -155,8 +158,8 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   and simply don't call `.log_prob`.
 - **`temp/` is not part of nanoACE.** If a gitignored `temp/` directory is present, treat
   it as archived external experiment code. It may contain useful ideas, but large
-  experiment-management machinery such as Slurm scripts, cache provenance, prefetch
-  systems, and resume matrices should not be copied into this repository.
+  experiment-management machinery such as Slurm scripts, cache provenance, elaborate
+  prefetch systems, and resume matrices should not be copied into this repository.
 - **Currently implemented:** `ace.py` for the model, `ace_prior_beta.py` for the
   shared Beta-specific ACEP prior-token helpers (including `sample_contaminated`
   for robust priors), `train.py` for the shared training loop / checkpointing /
