@@ -16,10 +16,17 @@
         --warn-bg: #fff7ed;
         --page-max: 1200px;
       }
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
-        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font:
+          14px/1.5 system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
         color: var(--fg);
         background: #fafafa;
       }
@@ -32,9 +39,20 @@
         gap: 16px;
         flex-wrap: wrap;
       }
-      header h1 { margin: 0; font-size: 20px; line-height: 1.2; white-space: nowrap; }
-      header p { margin: 0; color: var(--muted); flex: 1 1 360px; }
-      header a { color: var(--accent); }
+      header h1 {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+        flex: 1 1 360px;
+      }
+      header a {
+        color: var(--accent);
+      }
       .header-actions {
         display: flex;
         gap: 8px;
@@ -52,7 +70,11 @@
         cursor: pointer;
         white-space: nowrap;
       }
-      .header-btn:disabled { color: var(--muted); cursor: not-allowed; opacity: 0.7; }
+      .header-btn:disabled {
+        color: var(--muted);
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
       .tabs {
         display: flex;
         gap: 6px;
@@ -78,10 +100,21 @@
         border-color: var(--line);
         margin-bottom: -1px;
       }
-      main { max-width: var(--page-max); margin: 0 auto; padding: 20px 22px 60px; }
-      .panel { display: none; }
-      .panel.active { display: block; }
-      .loading { color: var(--muted); padding: 40px 0; }
+      main {
+        max-width: var(--page-max);
+        margin: 0 auto;
+        padding: 20px 22px 60px;
+      }
+      .panel {
+        display: none;
+      }
+      .panel.active {
+        display: block;
+      }
+      .loading {
+        color: var(--muted);
+        padding: 40px 0;
+      }
       .ace-modal {
         position: fixed;
         inset: 0;
@@ -91,7 +124,9 @@
         padding: 22px;
         background: rgba(28, 28, 30, 0.35);
       }
-      .ace-modal[hidden] { display: none; }
+      .ace-modal[hidden] {
+        display: none;
+      }
       .ace-modal-card {
         width: min(580px, 100%);
         max-height: min(720px, calc(100vh - 44px));
@@ -109,8 +144,15 @@
         justify-content: space-between;
         margin-bottom: 10px;
       }
-      .ace-modal h2 { margin: 0; font-size: 18px; line-height: 1.25; }
-      .ace-modal p { margin: 10px 0 0; color: #374151; }
+      .ace-modal h2 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+      .ace-modal p {
+        margin: 10px 0 0;
+        color: #374151;
+      }
       .ace-modal-close {
         appearance: none;
         border: 1px solid var(--line);
@@ -127,18 +169,34 @@
     <header>
       <h1>nanoACE playground</h1>
       <p>
-        Interactive amortized probabilistic conditioning in your browser.
-        See <a href="https://github.com/lacerbi/nanoACE">nanoACE</a>.
+        Interactive amortized probabilistic conditioning in your browser. See
+        <a href="https://github.com/lacerbi/nanoACE">nanoACE</a>.
       </p>
       <div class="header-actions">
-        <button class="header-btn ace-info-toggle" type="button" aria-haspopup="dialog" aria-controls="ace-modal" aria-expanded="false">What is ACE?</button>
-        <button class="header-btn fullscreen-toggle" type="button" aria-pressed="false">Full screen</button>
+        <button
+          class="header-btn ace-info-toggle"
+          type="button"
+          aria-haspopup="dialog"
+          aria-controls="ace-modal"
+          aria-expanded="false"
+        >
+          What is ACE?
+        </button>
+        <button
+          class="header-btn fullscreen-toggle"
+          type="button"
+          aria-pressed="false"
+        >
+          Full screen
+        </button>
       </div>
     </header>
 
     <nav class="tabs">
       <button class="tab active" data-tab="gp">GP-1D regression</button>
-      <button class="tab" data-tab="gaussian">Gaussian (μ, σ) with priors</button>
+      <button class="tab" data-tab="gaussian">
+        Gaussian (μ, σ) with priors
+      </button>
       <button class="tab" data-tab="sir">SIR SBI</button>
       <button class="tab" data-tab="bo">BO-1D</button>
     </nav>
@@ -159,36 +217,50 @@
     </main>
 
     <div class="ace-modal" id="ace-modal" hidden>
-      <div class="ace-modal-card" role="dialog" aria-modal="true" aria-labelledby="ace-modal-title">
+      <div
+        class="ace-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ace-modal-title"
+      >
         <div class="ace-modal-head">
           <h2 id="ace-modal-title">What is ACE?</h2>
           <button class="ace-modal-close" type="button">Close</button>
         </div>
         <p>
-          ACE, the Amortized Conditioning Engine, is a transformer-based probabilistic model.
-          It is trained on many simulated problem instances so that, at runtime, one forward
-          pass can return probability distributions instead of solving a new inference problem
-          from scratch.
-          ACE was developed by the
-          <a href="https://www.helsinki.fi/en/researchgroups/machine-and-human-intelligence">Machine and Human Intelligence research group</a>
+          ACE, the Amortized Conditioning Engine, is a transformer-based
+          probabilistic model. It is trained on many simulated problem instances
+          so that, at runtime, one forward pass can return probabilistic
+          predictions of interest instead of solving a new inference problem
+          from scratch. ACE was developed by the
+          <a
+            href="https://www.helsinki.fi/en/researchgroups/machine-and-human-intelligence"
+            >Machine and Human Intelligence research group</a
+          >
           at the University of Helsinki and collaborators; see the
-          <a href="https://acerbilab.github.io/amortized-conditioning-engine/">ACE project page</a>.
+          <a href="https://acerbilab.github.io/amortized-conditioning-engine/"
+            >ACE project page</a
+          >.
         </p>
         <p>
-          It sits in the same broad family as Prior-Fitted Networks (PFNs) and Transformer
-          Neural Processes (TNPs): models that learn how to condition on examples. ACE extends
-          that idea by treating more than data as tokens. Observations, unknown queries,
-          interpretable latent variables, and runtime prior information can all appear in the
-          same conditioning set.
+          It sits in the same broad family as Prior-Fitted Networks (PFNs) and
+          Transformer Neural Processes (TNPs), and not so different from modern
+          large language models (LLMs): models that learn to make predictions
+          based on — <em>conditioning</em> on — a provided set of observed data (called
+          the context, and encoded as tokens). ACE extends that idea by treating
+          more than just observed data as tokens. Observations, unknown queries,
+          interpretable latent variables, and prior information available at
+          runtime can all appear as tokens in the conditioning set.
         </p>
         <p>
-          That means ACE can condition on data, known parameter values, or a user's prior
-          belief, and it can predict new data as well as quantities like model parameters,
-          class labels, or the location of an optimum. The examples here show those
-          token-level conditioning moves in small, inspectable tasks using compact
-          pretrained networks that run in your browser. These browser models are
-          intentionally small, so expect some imperfections; larger deployed ACE models
-          perform better.
+          That means ACE can condition on data, known parameter values, or a
+          user's prior belief about the problem, and it can predict new data as
+          well as task-relevant quantities like model parameters, class labels,
+          or the location of an optimum. The examples here show those
+          token-level conditioning capabilities in small, inspectable tasks
+          using compact pretrained networks that run in your browser. These
+          browser models are intentionally small, so expect some imperfections;
+          larger deployed ACE models perform better.
         </p>
       </div>
     </div>
