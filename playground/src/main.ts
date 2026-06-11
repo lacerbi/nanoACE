@@ -83,6 +83,7 @@ async function mount(): Promise<void> {
   const gaussianEl = document.getElementById("gaussian");
   const sirEl = document.getElementById("sir");
   const boEl = document.getElementById("bo");
+  const arbufEl = document.getElementById("arbuf");
   if (gpEl) {
     try {
       const { mountGP } = await import("./gp/demo");
@@ -113,6 +114,14 @@ async function mount(): Promise<void> {
       await mountBO(boEl);
     } catch (err) {
       boEl.innerHTML = `<p class="loading">Failed to load BO demo: ${String(err)}</p>`;
+    }
+  }
+  if (arbufEl) {
+    try {
+      const { mountArbuf } = await import("./arbuf/demo");
+      await mountArbuf(arbufEl);
+    } catch (err) {
+      arbufEl.innerHTML = `<p class="loading">Failed to load AR-buffer demo: ${String(err)}</p>`;
     }
   }
 }

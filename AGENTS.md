@@ -175,7 +175,19 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
 - **`playground/` is a non-core example, not part of the core.** It is a Vite + TypeScript
   in-browser demo that reimplements `ace.py`'s forward pass in TS (parity-tested against
   the PyTorch model) so trained checkpoints run client-side. Current tabs cover GP-1D,
-  Gaussian, SIR, and BO-1D. The core stays torch-only and legible; do not let the JS toolchain or
+  Gaussian, SIR, BO-1D, and a **local-only** AR-buffer joint-sampling tab (the
+  `extensions/arbuffer/` model through a parity-tested TS port of its incremental
+  sampler; weights exported locally, not deployed — its tests self-skip when the blob
+  is absent). The core stays torch-only and legible; do not let the JS toolchain or
   web concerns bleed into `ace.py` or the examples.
   Treat it like `temp/` in spirit (separate, optional), but unlike `temp/` it *is* checked
   in and maintained. See `playground/README.md` and the DEVLOG "Web playground" entry.
+- **`extensions/` holds non-core model extensions.** Each child is self-contained
+  (own `README.md` + `DEVLOG.md`; root docs carry only pointers), torch-only, and changes
+  **no core file** — it imports the core (and may subclass its internals) from the repo
+  root via the playground's `sys.path` bootstrap pattern. Currently:
+  `extensions/arbuffer/`, a causal autoregressive buffer (Hassan et al., 2026) warm-started
+  from a trained GP-1D checkpoint with a frozen base — fast coherent joint function
+  sampling via one cached context encoding. An automatic step-0 bitwise parity check
+  guards the coupling to core internals: if `ace.py`'s forward changes, the warm start
+  fails loudly.

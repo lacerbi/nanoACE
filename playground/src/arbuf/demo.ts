@@ -1,0 +1,432 @@
+/**
+ * AR-buffer joint-sampling demo (UI layer).
+ *
+ * GP-tab interaction (click to add a context point, drag to move, shift-click to
+ * delete, pin any latent) — but the headline is coherent joint draws: the context
+ * is encoded once and cached, then a few draw streams decode autoregressively
+ * against the cache, animated step by step. The diagonal ±2σ band and independent
+ * per-point marginal samples are always shown for contrast, and Resample reuses
+ * the cached encoding (only the decode reruns).
+ */
+
+import { ARBUF, KERNEL_LABELS } from "../config";
+import { clamp, hitPoint, pointOodReasons } from "../interaction";
+import { makePlot, type Plot } from "../plot";
+import { BufferedACEModel, type CtxCache } from "../ace/buffered";
+import { loadWeights } from "../ace/weights";
+import { mulberry32 } from "../ace/rng";
+import {
+  arbufStatic,
+  buildContext,
+  JointSampler,
+  sampleIndependent,
+  type ArbufSpec,
+  type ArbufStatic,
+} from "./infer";
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface PinState {
+  kernel: number | null;
+  ell: boolean;
+  scale: boolean;
+}
+
+const DRAW_COLORS = ["#9333ea", "#ea580c", "#16a34a"];
+const INDEP_COLOR = "rgba(107,114,128,0.45)";
+const SEED0 = 12345;
+
+const CSS = `
+.ab-root { display: flex; flex-direction: column; gap: 12px; }
+.ab-hint { color: var(--muted); margin: 0; }
+.ab-note { color: var(--muted); margin: 0; font-size: 12px; }
+.ab-top { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+.ab-plot-col { display: flex; flex-direction: column; gap: 6px; }
+.ab-main { border: 1px solid var(--line); border-radius: 8px; background: #fff; touch-action: none; }
+.ab-status { color: var(--muted); margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ab-controls { display: flex; flex-direction: column; gap: 14px; min-width: 240px; }
+.ab-controls fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0; padding: 8px 10px; }
+.ab-controls legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
+.ab-kernel-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.ab-kernel-btns button { font: inherit; padding: 4px 8px; border: 1px solid var(--line);
+  background: #fff; border-radius: 6px; cursor: pointer; }
+.ab-kernel-btns button.sel { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.ab-slider-row { display: flex; align-items: center; gap: 8px; }
+.ab-slider-row input[type=range] { flex: 1; }
+.ab-slider-row .val { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 70px; text-align: right; }
+.ab-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.ab-btn { font: inherit; padding: 6px 10px; border: 1px solid var(--line); background: #fff;
+  border-radius: 6px; cursor: pointer; }
+`;
+
+function injectCss(): void {
+  if (document.getElementById("ab-style")) return;
+  const s = document.createElement("style");
+  s.id = "ab-style";
+  s.textContent = CSS;
+  document.head.appendChild(s);
+}
+
+const raf: (cb: () => void) => void =
+  typeof requestAnimationFrame === "function" ? (cb) => requestAnimationFrame(() => cb()) : (cb) => {
+    setTimeout(cb, 16);
+  };
+
+export async function mountArbuf(el: HTMLElement): Promise<void> {
+  injectCss();
+  let model: BufferedACEModel;
+  try {
+    const weights = await loadWeights(`${import.meta.env.BASE_URL}models/gp1d_arbuffer`);
+    model = new BufferedACEModel(weights);
+  } catch {
+    el.innerHTML = `<p class="loading">The AR-buffer model is not part of this deployment yet
+      (the tab is local-only until the retained fine-tune ships). To run it locally, export the
+      weights with <code>export_weights.py --task gp1d_arbuffer</code> — see the
+      "Run locally" section of <code>playground/README.md</code>.</p>`;
+    return;
+  }
+
+  const ellMeta = model.variables[1];
+  const scaleMeta = model.variables[2];
+
+  // --- state ---
+  const defaultPoints: Point[] = [
+    { x: -0.9, y: -0.4 },
+    { x: -0.55, y: 0.15 },
+    { x: -0.2, y: 0.55 },
+    { x: 0.5, y: 0.05 },
+  ];
+  const points: Point[] = defaultPoints.map((p) => ({ ...p }));
+  const pin: PinState = { kernel: null, ell: false, scale: false };
+  let ellVal = 0.5 * (ellMeta.bound_lo + ellMeta.bound_hi);
+  let scaleVal = 0.5 * (scaleMeta.bound_lo + scaleMeta.bound_hi);
+  let animate = true;
+  let dragIdx: number | null = null;
+  let seedCounter = 0;
+
+  // Derived inference state (cache survives Resample; static survives Resample).
+  let cache: CtxCache | null = null;
+  let stat: ArbufStatic | null = null;
+  let indep: number[][] = [];
+  let sampler: JointSampler | null = null;
+  let encodeMs = 0;
+  let decodeMs = 0;
+  let epoch = 0; // bumped to cancel stale animation loops
+
+  // --- DOM ---
+  el.innerHTML = "";
+  const root = document.createElement("div");
+  root.className = "ab-root";
+  root.innerHTML = `
+    <p class="ab-hint">Coherent joint function draws from a causal AR buffer
+      (<a href="https://github.com/lacerbi/nanoACE/tree/main/extensions/arbuffer">extensions/arbuffer</a>):
+      the context is encoded <em>once</em> and cached; each colored curve is decoded autoregressively
+      against that cache. Gray curves are independent per-point samples from the diagonal marginals —
+      same model, no coherence. Click to add a point · drag to move · shift-click to delete.</p>
+    <p class="ab-note">Preliminary 20k fine-tune model (K=128 settings); a longer retained run is planned.</p>
+    <div class="ab-top">
+      <div class="ab-plot-col">
+        <canvas class="ab-main" width="660" height="380" style="width:660px;height:380px;"></canvas>
+        <p class="ab-status"></p>
+      </div>
+      <div class="ab-controls">
+        <fieldset>
+          <legend>kernel</legend>
+          <div class="ab-kernel-btns"></div>
+        </fieldset>
+        <fieldset>
+          <legend>lengthscale</legend>
+          <label class="ab-slider-row"><input type="checkbox" class="pin-ell"/>pin (condition on this value)</label>
+          <div class="ab-slider-row"><input type="range" class="ell"/><span class="val ell-val"></span></div>
+        </fieldset>
+        <fieldset>
+          <legend>outputscale</legend>
+          <label class="ab-slider-row"><input type="checkbox" class="pin-scale"/>pin (condition on this value)</label>
+          <div class="ab-slider-row"><input type="range" class="scale"/><span class="val scale-val"></span></div>
+        </fieldset>
+        <fieldset>
+          <legend>sampling</legend>
+          <div class="ab-slider-row">
+            <button class="ab-btn ab-resample">Resample</button>
+            <label class="ab-slider-row"><input type="checkbox" class="ab-animate" checked/>animate the AR decode</label>
+          </div>
+        </fieldset>
+        <div class="ab-btns">
+          <button class="ab-btn reset">Reset points</button>
+          <button class="ab-btn clear">Clear points</button>
+        </div>
+      </div>
+    </div>
+  `;
+  el.appendChild(root);
+
+  const mainCanvas = root.querySelector<HTMLCanvasElement>(".ab-main")!;
+  const statusEl = root.querySelector<HTMLParagraphElement>(".ab-status")!;
+  const kernelBtns = root.querySelector<HTMLDivElement>(".ab-kernel-btns")!;
+  const ellSlider = root.querySelector<HTMLInputElement>(".ell")!;
+  const scaleSlider = root.querySelector<HTMLInputElement>(".scale")!;
+  const ellValEl = root.querySelector<HTMLSpanElement>(".ell-val")!;
+  const scaleValEl = root.querySelector<HTMLSpanElement>(".scale-val")!;
+  const pinEll = root.querySelector<HTMLInputElement>(".pin-ell")!;
+  const pinScale = root.querySelector<HTMLInputElement>(".pin-scale")!;
+  const animateBox = root.querySelector<HTMLInputElement>(".ab-animate")!;
+
+  const kernelOptions = ["Unknown", ...KERNEL_LABELS];
+  const kernelButtonEls: HTMLButtonElement[] = [];
+  kernelOptions.forEach((label, i) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      pin.kernel = i === 0 ? null : i - 1;
+      onContextChange();
+    });
+    kernelBtns.appendChild(b);
+    kernelButtonEls.push(b);
+  });
+
+  ellSlider.min = String(ellMeta.bound_lo);
+  ellSlider.max = String(ellMeta.bound_hi);
+  ellSlider.step = String((ellMeta.bound_hi - ellMeta.bound_lo) / 200);
+  ellSlider.value = String(ellVal);
+  scaleSlider.min = String(scaleMeta.bound_lo);
+  scaleSlider.max = String(scaleMeta.bound_hi);
+  scaleSlider.step = String((scaleMeta.bound_hi - scaleMeta.bound_lo) / 200);
+  scaleSlider.value = String(scaleVal);
+
+  ellSlider.addEventListener("input", () => {
+    ellVal = parseFloat(ellSlider.value);
+    if (pin.ell) onContextChange();
+    else updateControls();
+  });
+  scaleSlider.addEventListener("input", () => {
+    scaleVal = parseFloat(scaleSlider.value);
+    if (pin.scale) onContextChange();
+    else updateControls();
+  });
+  pinEll.addEventListener("change", () => {
+    pin.ell = pinEll.checked;
+    onContextChange();
+  });
+  pinScale.addEventListener("change", () => {
+    pin.scale = pinScale.checked;
+    onContextChange();
+  });
+  animateBox.addEventListener("change", () => {
+    animate = animateBox.checked;
+  });
+  root.querySelector<HTMLButtonElement>(".ab-resample")!.addEventListener("click", () => {
+    resample();
+  });
+  root.querySelector<HTMLButtonElement>(".reset")!.addEventListener("click", () => {
+    points.length = 0;
+    points.push(...defaultPoints.map((p) => ({ ...p })));
+    onContextChange();
+  });
+  root.querySelector<HTMLButtonElement>(".clear")!.addEventListener("click", () => {
+    points.length = 0;
+    onContextChange();
+  });
+
+  // pointer interaction (GP-tab semantics)
+  let mainPlot: Plot | null = null;
+  const clampX = (x: number) => clamp(x, ARBUF.X_DOMAIN[0], ARBUF.X_DOMAIN[1]);
+  const clampY = (y: number) => clamp(y, ARBUF.Y_VIEW[0], ARBUF.Y_VIEW[1]);
+
+  mainCanvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  mainCanvas.addEventListener("pointerdown", (e) => {
+    if (!mainPlot) return;
+    const hit = hitPoint(points, mainPlot, e.offsetX, e.offsetY, ARBUF.HIT_RADIUS_PX);
+    if (hit !== null && (e.shiftKey || e.button === 2)) {
+      points.splice(hit, 1);
+      onContextChange();
+      return;
+    }
+    if (hit !== null) {
+      dragIdx = hit;
+      mainCanvas.setPointerCapture(e.pointerId);
+      return;
+    }
+    points.push({ x: clampX(mainPlot.pxToX(e.offsetX)), y: clampY(mainPlot.pxToY(e.offsetY)) });
+    onContextChange();
+  });
+  mainCanvas.addEventListener("pointermove", (e) => {
+    if (dragIdx === null || !mainPlot) return;
+    points[dragIdx] = { x: clampX(mainPlot.pxToX(e.offsetX)), y: clampY(mainPlot.pxToY(e.offsetY)) };
+    onContextChange();
+  });
+  const endDrag = () => {
+    dragIdx = null;
+  };
+  mainCanvas.addEventListener("pointerup", endDrag);
+  mainCanvas.addEventListener("pointercancel", endDrag);
+
+  // --- inference orchestration ---
+  function spec(): ArbufSpec {
+    return {
+      points,
+      pinKernel: pin.kernel,
+      pinEll: pin.ell ? ellVal : null,
+      pinScale: pin.scale ? scaleVal : null,
+    };
+  }
+
+  function grid(): number[] {
+    const n = ARBUF.GRID_POINTS;
+    const out = new Array<number>(n);
+    for (let i = 0; i < n; i++) out[i] = ARBUF.X_DOMAIN[0] + ((ARBUF.X_DOMAIN[1] - ARBUF.X_DOMAIN[0]) * i) / (n - 1);
+    return out;
+  }
+
+  function hasContext(): boolean {
+    return points.length > 0 || pin.kernel !== null || pin.ell || pin.scale;
+  }
+
+  function onContextChange(): void {
+    updateControls();
+    epoch += 1;
+    if (!hasContext()) {
+      cache = null;
+      stat = null;
+      sampler = null;
+      drawEmpty();
+      return;
+    }
+    const context = buildContext(model, spec());
+    const t0 = performance.now();
+    cache = model.encodeContext(context);
+    encodeMs = performance.now() - t0;
+    stat = arbufStatic(model, context, grid());
+    resample();
+  }
+
+  function resample(): void {
+    if (!cache || !stat) return;
+    epoch += 1;
+    const myEpoch = epoch;
+    const rng = mulberry32(SEED0 + seedCounter++);
+    indep = sampleIndependent(stat, ARBUF.DRAWS, rng);
+    sampler = new JointSampler(model, cache, stat.grid, { nDraws: ARBUF.DRAWS, rng });
+    decodeMs = 0;
+
+    if (!animate) {
+      const t0 = performance.now();
+      sampler.runAll();
+      decodeMs = performance.now() - t0;
+      draw();
+      return;
+    }
+    const tick = () => {
+      if (myEpoch !== epoch || !sampler) return;
+      const t0 = performance.now();
+      for (let s = 0; s < ARBUF.STEPS_PER_FRAME && sampler.step(); s++) {
+        // advance the chain
+      }
+      decodeMs += performance.now() - t0;
+      draw();
+      if (!sampler.done) raf(tick);
+    };
+    raf(tick);
+  }
+
+  // --- rendering ---
+  function oodReasons(): string[] {
+    const reasons = pointOodReasons(points, {
+      yIsOod: (y) => Math.abs(y) > ARBUF.Y_OOD,
+      yReason: `beyond training y-range (|y| > ${ARBUF.Y_OOD})`,
+      maxPoints: ARBUF.MAX_CONTEXT_HINT,
+      maxReason: (n) => `${n} points (training used ≤ ${ARBUF.MAX_CONTEXT_HINT})`,
+    });
+    const nPinned = (pin.kernel !== null ? 1 : 0) + (pin.ell ? 1 : 0) + (pin.scale ? 1 : 0);
+    if (points.length === 0 && nPinned > 0) {
+      reasons.push("latent-only context (training used at least 4 data points)");
+    }
+    return reasons;
+  }
+
+  function updateControls(): void {
+    kernelButtonEls.forEach((b, i) => {
+      const sel = i === 0 ? pin.kernel === null : pin.kernel === i - 1;
+      b.classList.toggle("sel", sel);
+    });
+    pinEll.checked = pin.ell;
+    pinScale.checked = pin.scale;
+    ellValEl.textContent = `ℓ=${Math.exp(ellVal).toFixed(3)}`;
+    scaleValEl.textContent = `σ=${Math.exp(scaleVal).toFixed(3)}`;
+  }
+
+  function basePlot(): Plot {
+    const p = makePlot(mainCanvas, { xDomain: ARBUF.X_DOMAIN, yDomain: ARBUF.Y_VIEW });
+    p.clear();
+    p.rectData(ARBUF.X_DOMAIN[0], ARBUF.X_DOMAIN[1], ARBUF.Y_NORMAL[0], ARBUF.Y_NORMAL[1], "rgba(37,99,235,0.05)");
+    p.hline(0, "#eceef2", 1);
+    return p;
+  }
+
+  function drawEmpty(): void {
+    mainPlot = basePlot();
+    mainPlot.axes();
+    const ctx = mainPlot.ctx;
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "14px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("Add a point or pin a latent to draw joint samples.", mainPlot.width / 2, mainPlot.height / 2);
+    ctx.textAlign = "start";
+    statusEl.textContent = "";
+  }
+
+  function draw(): void {
+    if (!stat || !sampler) return;
+    mainPlot = basePlot();
+    const lo = stat.bandMean.map((m, i) => m - 2 * stat!.bandStd[i]);
+    const hi = stat.bandMean.map((m, i) => m + 2 * stat!.bandStd[i]);
+    mainPlot.band(stat.grid, lo, hi, "rgba(37,99,235,0.12)");
+
+    // Independent marginal samples: full jagged lines, no coherence.
+    for (const line of indep) mainPlot.line(stat.grid, line, INDEP_COLOR, 1);
+
+    // Coherent draws: realized prefix of each chain, sorted by x for the polyline.
+    for (let b = 0; b < sampler.values.length; b++) {
+      const pts: Array<[number, number]> = [];
+      for (let j = 0; j < stat.grid.length; j++) {
+        const v = sampler.values[b][j];
+        if (!Number.isNaN(v)) pts.push([stat.grid[j], v]);
+      }
+      const color = DRAW_COLORS[b % DRAW_COLORS.length];
+      if (pts.length > 1) {
+        mainPlot.line(pts.map((p) => p[0]), pts.map((p) => p[1]), color, 1.4);
+      }
+      mainPlot.dots(pts, color, 2);
+    }
+
+    mainPlot.dots(
+      points.filter((p) => Math.abs(p.y) <= ARBUF.Y_OOD).map((p) => [p.x, p.y] as [number, number]),
+      "#111827",
+      4,
+    );
+    mainPlot.dots(
+      points.filter((p) => Math.abs(p.y) > ARBUF.Y_OOD).map((p) => [p.x, p.y] as [number, number]),
+      "#b45309",
+      4,
+    );
+    mainPlot.axes();
+    mainPlot.label("diagonal ±2σ (context only)", 50, 16, { fill: "#2563eb" });
+    mainPlot.label("independent marginal samples", 50, 30, { fill: "#6b7280" });
+    mainPlot.label(`${sampler.values.length} coherent draws (AR buffer)`, 50, 44, { fill: DRAW_COLORS[0] });
+
+    const reasons = oodReasons();
+    mainPlot.warning(reasons.length ? `Out of training distribution: ${reasons.join(" / ")}` : "");
+
+    const k = stat.grid.length;
+    const stepsDone = sampler.steps;
+    const decoding = sampler.done ? "" : ` (decoding ${stepsDone}/${k}…)`;
+    statusEl.textContent =
+      `context encoded once: ${encodeMs.toFixed(1)} ms · ` +
+      `decode ${sampler.values.length} × ${k} steps: ${decodeMs.toFixed(0)} ms${decoding} · ` +
+      `Resample reuses the cached encoding`;
+  }
+
+  onContextChange();
+}

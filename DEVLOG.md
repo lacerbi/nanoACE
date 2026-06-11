@@ -9,6 +9,44 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-11 — AR-buffer playground tab (local-only)
+
+- **The playground gained a fifth tab** running the `extensions/arbuffer/` buffered
+  GP-1D model in-browser: context encoded once and cached, a few coherent joint
+  function draws decoded autoregressively against the cache (animated), always shown
+  next to the diagonal band and independent per-point marginal samples. TS port of
+  the incremental sampler in `playground/src/ace/buffered.ts` (base port untouched),
+  parity-guarded by new buffered fixtures (packed per-layer + teacher-forced chain).
+  **Local-only**: the temporary 20k K=128 checkpoint is exported locally, not
+  deployed — tab and tests self-skip when the blob is absent, so the four-model
+  deploy flow is unchanged. Plan + verification:
+  [docs/plans/PLAN-arbuffer-playground.md](docs/plans/PLAN-arbuffer-playground.md);
+  design notes in `extensions/arbuffer/DEVLOG.md`.
+
+---
+
+## 2026-06-11 — `extensions/` taxonomy + AR-buffer extension (`extensions/arbuffer/`)
+
+- **New root folder `extensions/` for non-core model extensions.** Each child is
+  self-contained with its own local `README.md` and `DEVLOG.md`; the root docs (this
+  file, `README.md`, `AGENTS.md`) carry only short pointers. Extensions are torch-only,
+  change no core file, and import the core from the repo root (the playground's
+  `sys.path` bootstrap pattern). `playground/` stays where it is — it is a port/demo,
+  not a model extension.
+- **First entry: `extensions/arbuffer/`** — the causal autoregressive buffer of Hassan
+  et al. (2026, ICLR), attached to the retained GP-1D checkpoint as a warm-started,
+  frozen-base fine-tune: encode the context once, cache it, and draw coherent joint
+  function samples through a causal buffer stream instead of `sample_ar`'s
+  re-encode-everything loop. Doubles as the extensibility demo: schema, embedder, heads,
+  `train.fit`, checkpoints, GP physics, and the oracle diagnostics are all reused;
+  only the buffer stream and the cached sampler are new. Design decisions, deviations
+  from the paper (zero-init gated buffer read for bit-exact warm starts, all-buffered
+  curriculum under a frozen base, no positional/role embeddings), and verification live
+  in `extensions/arbuffer/DEVLOG.md`; the plan + full verification log in
+  `docs/plans/PLAN-arbuffer.md`.
+
+---
+
 ## 2026-06-08 — Offline data pool (`data.py`) + per-step reseed (stateless reproducibility)
 
 Full plan + verification log: [docs/plans/PLAN-offline-data-and-reseed.md](docs/plans/PLAN-offline-data-and-reseed.md).

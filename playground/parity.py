@@ -31,8 +31,18 @@ import gp1d  # noqa: E402
 import sbi_sir  # noqa: E402
 from ace import PRIOR, QUERY, VALUE, Batch, Tokens, encode_value  # noqa: E402
 from export_weights import quantize_fp16_inplace  # noqa: E402  (same dir as this script)
+from extensions.arbuffer.arbuffer import (  # noqa: E402  (non-core extension)
+    BufferedBatch,
+    load_buffered_checkpoint,
+    sample_joint,
+)
 
 OUT_DIR = Path(__file__).resolve().parent / "test" / "fixtures"
+
+# Temporary 20k validation fine-tune (K=128 settings); swap for the retained run by
+# re-running export_weights.py and this script together. Fixtures are skipped (with a
+# note) when the artifact is absent, so the four core fixture sets stay regenerable.
+ARBUF_CKPT = REPO_ROOT / "artifacts" / "gp1d_arbuffer_k128.pt"
 
 
 class TokenBuilder:
@@ -484,6 +494,132 @@ def bo_demo_reference(model) -> dict:
     }
 
 
+@torch.no_grad()
+def arbuf_packed_case(model) -> dict:
+    """Packed `forward_buffered` reference with `prefix_len = arange(K)`.
+
+    Gives the TS incremental sampler per-layer, per-token reference states: buffer
+    row `j` corresponds to the TS append pass for token `j`, and target row `m`
+    (which sees exactly the first `m` buffer tokens) corresponds to TS decode step
+    `m`. Everything is dense/all-active, so the per-layer mask zeroing is the
+    identity and the captured ctx states equal `encode_context`'s pre-zeroing ones.
+    """
+
+    device = next(model.parameters()).device
+    ctx_b = TokenBuilder()
+    for x, y in [(-0.6, 0.4), (-0.1, -0.3), (0.3, 0.8), (0.55, 0.2)]:
+        ctx_b.add(0, VALUE, x=x, value=y)
+    ctx_b.add(3, VALUE, value=2.0, value_index=2)  # kernel pinned: Matern-3/2
+
+    buf_xy = [
+        (-0.9, 0.12), (-0.72, 0.31), (-0.48, 0.05), (-0.31, -0.22),
+        (-0.14, -0.41), (0.04, -0.12), (0.18, 0.47), (0.39, 0.63),
+        (0.57, 0.36), (0.71, 0.08), (0.84, -0.17), (0.96, -0.33),
+    ]
+    buf_b = TokenBuilder()
+    tgt_b = TokenBuilder()
+    for x, y in buf_xy:
+        buf_b.add(0, VALUE, x=x, value=y)
+        tgt_b.add(0, QUERY, x=x, value=y)  # truth in value for log_prob
+
+    context = ctx_b.tokens(device)
+    buffer = buf_b.tokens(device)
+    target = tgt_b.tokens(device)
+    k = len(buf_xy)
+    prefix = torch.arange(k, device=device)[None, :]
+    bbatch = BufferedBatch(model.variables, context, buffer, target, prefix)
+
+    # Replicate forward_buffered step by step to capture per-layer states (the same
+    # pattern as run_case's manual replication of ACE.forward).
+    ctx = model._embed(context)
+    buf = model._embed(buffer)
+    tgt = model._embed(target)
+    kp_ctx = ~context.mask
+    b, n = context.mask.shape
+    kp_ctx_buf = torch.cat([kp_ctx, torch.zeros(b, k, dtype=torch.bool, device=device)], dim=1)
+    ar = torch.arange(k, device=device)
+    causal = torch.zeros(k, n + k, dtype=torch.bool, device=device)
+    causal[:, n:] = ar[None, :] > ar[:, None]
+    blocked = ar[None, None, :] >= prefix[:, :, None]
+    zero_prefix = prefix == 0
+    blocked[..., 0] = blocked[..., 0] & ~zero_prefix
+    prefix_mask = blocked.repeat_interleave(model.cfg.n_heads, dim=0)
+    gate = (~zero_prefix).to(tgt.dtype).unsqueeze(-1)
+
+    per_ctx, per_buf, per_tgt = [], [], []
+    for blk, bblk in zip(model.blocks, model.buf_blocks):
+        ctx_in = ctx
+        ctx_q = blk.ctx_ln1(ctx)
+        ctx_att, _ = blk.ctx_attn(ctx_q, ctx_q, ctx_q, key_padding_mask=kp_ctx, need_weights=False)
+        ctx = ctx + ctx_att
+        ctx = ctx + blk.ctx_mlp(blk.ctx_ln2(ctx))
+        buf_q = bblk.buf_ln1(buf)
+        buf_kv = bblk.buf_ln1(torch.cat([ctx_in, buf], dim=1))
+        buf_att, _ = bblk.buf_attn(
+            buf_q, buf_kv, buf_kv, key_padding_mask=kp_ctx_buf, attn_mask=causal, need_weights=False
+        )
+        buf = buf + buf_att
+        buf = buf + bblk.buf_mlp(bblk.buf_ln2(buf))
+        kv_c = blk.kv_ln(ctx)
+        tgt_att, _ = blk.cross_attn(blk.tgt_ln1(tgt), kv_c, kv_c, key_padding_mask=kp_ctx, need_weights=False)
+        tgt = tgt + tgt_att
+        kv_b = bblk.tgt_buf_kvln(buf)
+        read, _ = bblk.tgt_buf_attn(bblk.tgt_buf_qln(tgt), kv_b, kv_b, attn_mask=prefix_mask, need_weights=False)
+        tgt = tgt + read * gate
+        tgt = tgt + blk.tgt_mlp(blk.tgt_ln2(tgt))
+        ctx = ctx * context.mask.unsqueeze(-1)
+        tgt = tgt * target.mask.unsqueeze(-1)
+        per_ctx.append(ctx.clone())
+        per_buf.append(buf.clone())
+        per_tgt.append(tgt.clone())
+    cont_raw = model.cont_head(model.final_norm(tgt))
+
+    # Sanity: the replication must match the real forward_buffered.
+    pred = model.forward_buffered(bbatch)
+    assert torch.allclose(cont_raw, pred.cont_raw, atol=1e-6), "arbuf packed replication drifted"
+
+    return {
+        "context": ctx_b.json(),
+        "buffer": buf_b.json(),
+        "target": tgt_b.json(),
+        "prefix_len": prefix[0].tolist(),
+        "per_layer_ctx": [s[0].tolist() for s in per_ctx],
+        "per_layer_buf": [s[0].tolist() for s in per_buf],
+        "per_layer_tgt": [s[0].tolist() for s in per_tgt],
+        "cont_raw": pred.cont_raw[0].tolist(),
+        "log_prob": pred.log_prob(target)[0].tolist(),
+    }
+
+
+@torch.no_grad()
+def arbuf_chain_case(model) -> dict:
+    """Teacher-forced `sample_joint` chain (fixed order/values, per-step log-probs):
+    the exact incremental-cache semantics the TS sampler implements, end to end."""
+
+    device = next(model.parameters()).device
+    ctx_b = TokenBuilder()
+    for x, y in [(-0.6, 0.4), (-0.1, -0.3), (0.3, 0.8), (0.55, 0.2)]:
+        ctx_b.add(0, VALUE, x=x, value=y)
+    context = ctx_b.tokens(device)
+
+    kc = 16
+    grid = torch.linspace(-1.0, 1.0, kc)
+    order = [5, 12, 0, 9, 15, 3, 7, 1, 14, 10, 4, 8, 2, 13, 6, 11]
+    forced = torch.stack([0.5 * torch.sin(3.0 * grid), 0.3 * torch.cos(2.0 * grid) - 0.1]).to(device)
+    values, logps = sample_joint(
+        model, context, grid.to(device), n_draws=2, order=order, teacher_force=forced
+    )
+    assert torch.equal(values, forced), "teacher-forced chain must return the forced values"
+
+    return {
+        "context": ctx_b.json(),
+        "grid": grid.tolist(),
+        "order": order,
+        "values": forced.tolist(),
+        "log_prob": logps.tolist(),
+    }
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     device = torch.device("cpu")
@@ -523,6 +659,22 @@ def main() -> None:
     print(f"wrote bo1d.parity.json ({len(bo)} cases)")
     (OUT_DIR / "bo1d.demo.json").write_text(json.dumps(bo_demo_reference(bo_model)))
     print("wrote bo1d.demo.json")
+
+    if ARBUF_CKPT.exists():
+        arb_model = load_buffered_checkpoint(str(ARBUF_CKPT), device, gp1d.variables())
+        arb_model.eval()
+        quantize_fp16_inplace(arb_model)  # match the shipped fp16 weights
+        payload = {
+            # plain-forward cases on the buffered checkpoint: the frozen-base
+            # invariant extended through the export (reuses the GP case builders).
+            "plain": gp_cases(arb_model),
+            "packed": arbuf_packed_case(arb_model),
+            "chain": arbuf_chain_case(arb_model),
+        }
+        (OUT_DIR / "gp1d_arbuffer.parity.json").write_text(json.dumps(payload))
+        print(f"wrote gp1d_arbuffer.parity.json ({len(payload['plain'])} plain cases + packed + chain)")
+    else:
+        print(f"skipped gp1d_arbuffer fixtures ({ARBUF_CKPT} not found)")
 
 
 if __name__ == "__main__":

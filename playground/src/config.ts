@@ -56,5 +56,19 @@ export const BO = {
   HIT_RADIUS_PX: 12,
 };
 
+export const ARBUF = {
+  X_DOMAIN: [-1, 1] as [number, number],
+  Y_VIEW: [-2.6, 2.6] as [number, number],
+  Y_NORMAL: [-1, 1] as [number, number],
+  Y_OOD: 2.0,
+  // The frozen base encoder trained at <= 14 context points; the fine-tune *saw*
+  // (but could not learn from) contexts up to 20, so the hint stays conservative.
+  MAX_CONTEXT_HINT: 14,
+  DRAWS: 3, // coherent draw streams (and independent-sample lines)
+  GRID_POINTS: 32, // fixed chain length (well inside the K=128 fine-tune's prefix range)
+  STEPS_PER_FRAME: 1, // decode steps per animation frame (32 steps ≈ half a second)
+  HIT_RADIUS_PX: 12,
+};
+
 // Display labels for the discrete kernel latent (order matches gp1d.KERNELS).
 export const KERNEL_LABELS = ["RBF", "Matérn-½", "Matérn-3/2", "Periodic"];

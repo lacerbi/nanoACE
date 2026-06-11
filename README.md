@@ -75,10 +75,22 @@ Implemented modules:
   (separate toolchain) where trained models run client-side — GP-1D, Gaussian,
   SIR, and BO-1D, with interactive conditioning, latent/prior controls, and
   oracle overlays where practical. BO-1D stays no-oracle and overlays
-  optimum-location/value marginals on the editable regression plot.
+  optimum-location/value marginals on the editable regression plot. A fifth,
+  **local-only** tab runs the AR-buffer extension's coherent joint sampling
+  (weights not yet deployed; see below).
   See [playground/README.md](playground/README.md). The Python core stays
   torch-only; the playground is an example built on a parity-tested TS port of
   `ace.py`'s forward pass.
+- [extensions/arbuffer/](extensions/arbuffer/): a **non-core** extension adding
+  the causal autoregressive buffer of Hassan et al. (2026) on top of a trained
+  GP-1D checkpoint — warm-started bit-exactly, base frozen, only the new buffer
+  stream fine-tuned. Encodes the context once and draws many coherent joint
+  function samples from the cached encoding (vs `sample_ar`'s per-step
+  re-encoding), plus one-pass joint density evaluation. Also the repository's
+  extensibility demo (no core file changes). A local-only playground tab runs
+  its incremental sampler in the browser (preliminary 20k weights, exported
+  locally and not deployed until the retained fine-tune lands). See
+  [extensions/arbuffer/README.md](extensions/arbuffer/README.md).
 - [DEVLOG.md](DEVLOG.md): design decisions and rationale. Read this before
   changing architecture or scope.
 
@@ -88,8 +100,10 @@ Gaussian 80k steps, GP-1D 200k, SIR 100k, and BO-1D 200k.
 Local `artifacts/` and `playground/public/models/` remain gitignored in nanoACE.
 
 Next work: inspect the deployed Pages build against the public weights, add
-manifest-level training provenance on the next export, and consider whether the
-shared prior path warrants a discrete-latent runtime prior.
+manifest-level training provenance on the next export, consider whether the
+shared prior path warrants a discrete-latent runtime prior, and run the
+retained AR-buffer fine-tune — 200k steps at the K=128 settings
+(`extensions/arbuffer/`, a fresh run, not a resume of the 20k validation runs).
 
 ## Setup
 

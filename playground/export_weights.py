@@ -42,7 +42,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Task name -> module providing load_checkpoint(path, device) and variables().
-TASK_MODULES = {"gp1d": "gp1d", "gaussian": "gaussian_toy", "sbi_sir": "sbi_sir", "bo1d": "bo1d"}
+# gp1d_arbuffer is the non-core extension model (extensions/arbuffer/): same
+# manifest format, with the extra buf_blocks.* tensors flowing through the
+# generic state-dict table below.
+TASK_MODULES = {
+    "gp1d": "gp1d",
+    "gaussian": "gaussian_toy",
+    "sbi_sir": "sbi_sir",
+    "bo1d": "bo1d",
+    "gp1d_arbuffer": "extensions.arbuffer.gp1d_arbuffer",
+}
 
 
 def quantize_fp16_inplace(model) -> None:

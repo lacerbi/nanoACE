@@ -9,7 +9,7 @@ browser — no server, no backend.
 > The core stays torch-only and legible; this folder carries the JS/TS toolchain.
 > It is a frozen snapshot of the model's forward pass, kept honest by a parity test.
 
-Four demos:
+Five demos:
 
 - **GP-1D regression** — click to add/drag/delete points; watch the posterior
   predictive band, the kernel posterior, and the lengthscale/outputscale
@@ -24,6 +24,13 @@ Four demos:
 - **BO-1D** - edit black-box function observations, set or fix priors over
   `x_opt` and `y_opt`, and inspect the optimum-location/value marginals
   overlaid on the regression plot. BO intentionally has no oracle.
+- **GP-1D joint draws (AR)** — the `extensions/arbuffer/` buffered GP model:
+  edit context points / pin latents like the GP tab, then watch a few
+  **coherent joint function draws** decode autoregressively from one cached
+  context encoding (animated), next to the diagonal band and independent
+  per-point marginal samples. **Local-only for now**: the weights are a
+  preliminary 20k fine-tune, exported locally and not deployed; the tab and
+  its tests self-skip/notice gracefully when the blob is absent.
 
 ## Run locally
 
@@ -39,6 +46,8 @@ python playground/export_weights.py --task gp1d     --checkpoint artifacts/gp1d.
 python playground/export_weights.py --task gaussian --checkpoint artifacts/gaussian_toy.pt --out playground/public/models/gaussian
 python playground/export_weights.py --task sbi_sir  --checkpoint artifacts/sbi_sir.pt      --out playground/public/models/sbi_sir
 python playground/export_weights.py --task bo1d     --checkpoint artifacts/bo1d.pt         --out playground/public/models/bo1d
+# local-only AR-buffer tab (extensions/arbuffer/ fine-tuned checkpoint)
+python playground/export_weights.py --task gp1d_arbuffer --checkpoint artifacts/gp1d_arbuffer_k128.pt --out playground/public/models/gp1d_arbuffer
 
 cd playground
 npm install
@@ -63,6 +72,12 @@ npm test           # vitest: parity + orchestration + UI smoke tests
   (DOM-free inference) and a `demo.ts` (UI). `oracle.ts` is the Gaussian analytic
   posterior or SIR numerical grid oracle where applicable.
   BO lives in `src/bo/` and intentionally has no oracle.
+- `src/ace/buffered.ts` + `src/arbuf/` — the AR-buffer tab: a TS port of the
+  `extensions/arbuffer/` incremental sampler (`encode_context` + per-step decode,
+  with projected-KV caches instead of Python's reproject-per-read — same math,
+  same fixtures) on top of the untouched base port, plus the tab's DOM-free
+  `infer.ts` (context builder, static band pass, step-driveable `JointSampler`)
+  and `demo.ts`.
 - `src/config.ts` — all tunable constants (OOD thresholds, view ranges, grid
   sizes) in one place.
 
@@ -107,6 +122,15 @@ padding) plus per-layer intermediates. `npm test` asserts the TS forward
 reproduces the PyTorch embeddings, per-layer states, raw head outputs, and
 derived quantities, and that each demo's orchestration matches `gp1d.py`,
 `gaussian_toy.py`, or `sbi_sir.py`.
+
+The AR-buffer tab has its own fixture set (`gp1d_arbuffer.parity.json`): plain
+forward on the buffered checkpoint (the frozen-base invariant through the
+export), a packed `forward_buffered` pass with per-layer states (buffer row j ↔
+TS append pass j, target row m ↔ decode step m, so divergence localizes to a
+layer), and a teacher-forced `sample_joint` chain (the exact incremental
+semantics the TS sampler implements). `parity.py` skips this block, and the TS
+tests self-skip, when the local-only checkpoint/blob is absent — so the deploy
+workflow's `npm test` stays green with only the four public models.
 
 Weights ship as **float16** (half the blob size). `export_weights.py` rounds each
 parameter with torch's `.half().float()` before serializing, and `parity.py`
