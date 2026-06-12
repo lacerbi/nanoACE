@@ -44,6 +44,18 @@ Transformer Probabilistic Models* (ICLR 2026) — "the paper" below.
   targets instead of having to learn buffer use from a closed gate. Measured:
   a 20-step smoke already scored buffered ≈ slow-AR (+0.53 vs +0.54), and the
   20k run's first logged loss was −0.83 vs the −0.47 base context-only NLL.
+- **Role embeddings: reconsidered for the concat read, declined again.** The
+  paper marks token types (`e_ctx`/`e_buf`) because one shared transformer
+  processes all sets and could not otherwise tell them apart. Here the only
+  anonymous mixing is inside the read's softmax — and append semantics *wants*
+  a realized point treated like an observation there (that indistinguishability
+  is exactly what makes the init ≈ slow-AR). The distinction stays learnable
+  regardless: buffer states pass through the buffer stream's own diverging
+  weight copies, and `buf_bias` already acts as a rank-0, logit-only role
+  marker. Reconsider trigger: sampled draws showing compounding-error
+  (exposure-bias) artifacts, or joint density plateauing below slow-AR — the
+  cheap probe is a single zero-init `d_model` role vector added to buffer
+  embeddings post-`_embed`, which preserves init behavior exactly.
 - **20k validation (K=64, `--no-freeze-base`, bias −5).** Joint log-density
   per point (16 held-out functions, 4 ctx, 4 shared orders): diagonal −0.345
   < buffered **+1.554** < slow-AR +1.650 — **~95% of the AR gap recovered**,
