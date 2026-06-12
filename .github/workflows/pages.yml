@@ -3,6 +3,10 @@ name: Deploy playground to GitHub Pages
 # Manual-only for now (no auto-deploy on push). Run from the Actions tab.
 # Prerequisite: Settings -> Pages -> Build and deployment -> Source = GitHub Actions.
 #
+# Note (2026-06): GitHub deprecates Node 20 for Actions — the v4 actions below get
+# forced onto Node 24 from 2026-06-16 (expected to keep working) and Node 20 leaves
+# the runners 2026-09-16. Bump action versions when this next gets touched.
+#
 # Model weights live in a separate repository so normal nanoACE clones stay lean.
 # The workflow checks out that repository beside the app, copies only the model
 # directories into playground/public/models, then fails fast if any expected blob
