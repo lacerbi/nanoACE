@@ -41,6 +41,11 @@ interface Point {
 const SEED0 = 20260612;
 const ORACLE_SEED = 777;
 
+// One color per latent, shared by the marginal and metric panels.
+const LATENT_COLOR = { ell: "#9333ea", scale: "#0d9488", kernel: "#64748b" };
+const LATENT_DIM = { ell: "rgba(147,51,234,0.35)", scale: "rgba(13,148,136,0.35)" };
+const KERNEL_SHORT = ["RBF", "M½", "M3/2", "Per"];
+
 const EXPLAINER = {
   title: "About: active learning with ALINE",
   html: `
@@ -142,7 +147,7 @@ export async function mountAline(el: HTMLElement): Promise<void> {
   let obsIdx: number[] = [];
   let episodeSeed = 0;
   let revealTruth = false;
-  let history: Array<{ t: number; rmse: number; logq: number }> = [];
+  let history: Array<{ t: number; rmse: number; ell: number; scale: number; kernel: number }> = [];
 
   const defaultPoints: Point[] = [
     { x: -0.9, y: -0.4 },
@@ -177,8 +182,9 @@ export async function mountAline(el: HTMLElement): Promise<void> {
       <div class="al-plot-col">
         <canvas class="al-main" width="660" height="380" style="width:660px;height:380px;"></canvas>
         <div class="al-minis">
-          <canvas class="al-mini al-metric" width="326" height="110" style="width:326px;height:110px;"></canvas>
-          <canvas class="al-mini al-goalpanel" width="326" height="110" style="width:326px;height:110px;"></canvas>
+          <canvas class="al-mini al-metric" width="214" height="110" style="width:214px;height:110px;"></canvas>
+          <canvas class="al-mini al-latents" width="214" height="110" style="width:214px;height:110px;"></canvas>
+          <canvas class="al-mini al-kernelpanel" width="214" height="110" style="width:214px;height:110px;"></canvas>
         </div>
         <p class="al-status"></p>
       </div>
@@ -224,7 +230,8 @@ export async function mountAline(el: HTMLElement): Promise<void> {
 
   const mainCanvas = root.querySelector<HTMLCanvasElement>(".al-main")!;
   const metricCanvas = root.querySelector<HTMLCanvasElement>(".al-metric")!;
-  const goalCanvas = root.querySelector<HTMLCanvasElement>(".al-goalpanel")!;
+  const latentsCanvas = root.querySelector<HTMLCanvasElement>(".al-latents")!;
+  const kernelCanvas = root.querySelector<HTMLCanvasElement>(".al-kernelpanel")!;
   const statusEl = root.querySelector<HTMLParagraphElement>(".al-status")!;
   const counterEl = root.querySelector<HTMLSpanElement>(".al-counter")!;
   const modeEpisode = root.querySelector<HTMLInputElement>(".al-mode-episode")!;
@@ -301,7 +308,8 @@ export async function mountAline(el: HTMLElement): Promise<void> {
 
   function pushHistory(): void {
     if (mode !== "episode" || !lastStep?.metrics) return;
-    history.push({ t: stepsTaken(), rmse: lastStep.metrics.rmse, logq: lastStep.metrics.logqTheta });
+    const m = lastStep.metrics;
+    history.push({ t: stepsTaken(), rmse: m.rmse, ell: m.logq.ell, scale: m.logq.scale, kernel: m.logq.kernel });
   }
 
   function newEpisode(): void {
@@ -541,7 +549,8 @@ export async function mountAline(el: HTMLElement): Promise<void> {
       statusEl.textContent = "";
       updateControls();
       drawMetricPanel();
-      drawGoalPanel();
+      drawLatentsPanel();
+      drawKernelPanel();
       return;
     }
 
@@ -581,9 +590,10 @@ export async function mountAline(el: HTMLElement): Promise<void> {
       const truthTxt = revealTruth
         ? ` · truth: ${KERNEL_LABELS[draw.kernel]}, ℓ=${Math.exp(draw.logEll).toFixed(2)}, σ=${Math.exp(draw.logScale).toFixed(2)}`
         : " · truth hidden";
+      const logqMean = m ? (m.logq.ell + m.logq.scale + m.logq.kernel) / 3 : null;
       statusEl.textContent =
         `step ${stepsTaken()}/${ALINE.T} · RMSE ${m ? m.rmse.toFixed(3) : "—"} · ` +
-        `log q(θ) ${m ? m.logqTheta.toFixed(2) : "—"}${truthTxt} · ${stepMs.toFixed(0)} ms/step`;
+        `log q(θ) ${logqMean !== null ? logqMean.toFixed(2) : "—"}${truthTxt} · ${stepMs.toFixed(0)} ms/step`;
     } else {
       statusEl.textContent =
         `${obs.length} point${obs.length === 1 ? "" : "s"} · policy advice live · ` +
@@ -591,27 +601,43 @@ export async function mountAline(el: HTMLElement): Promise<void> {
     }
     updateControls();
     drawMetricPanel();
-    drawGoalPanel();
+    drawLatentsPanel();
+    drawKernelPanel();
   }
 
   function drawMetricPanel(): void {
-    const usePred = goal.pred || !(goal.ell || goal.scale || goal.kernel);
-    const series = history.map((h) => ({ t: h.t, v: usePred ? h.rmse : h.logq }));
+    // Predictive goal -> RMSE; parameter goals -> one log q(θ_true) line per
+    // TARGETED latent (all three are recorded every step, so switching goals
+    // re-renders whichever series without gaps).
+    const seriesKeys: Array<"ell" | "scale" | "kernel"> = goal.pred
+      ? []
+      : (["ell", "scale", "kernel"] as const).filter((k) => goal[k]);
+    const values = goal.pred
+      ? history.map((h) => h.rmse)
+      : seriesKeys.flatMap((k) => history.map((h) => h[k]));
     const p = makePlot(metricCanvas, {
       xDomain: [0, ALINE.T],
-      yDomain: yDomainOf(series.map((s) => s.v)),
-      padding: { l: 38, r: 8, t: 8, b: 16 },
+      yDomain: yDomainOf(values),
+      padding: { l: 30, r: 6, t: 8, b: 14 },
     });
     p.clear();
     p.axes();
-    const name = usePred ? "RMSE vs steps" : "log q(θ_true) vs steps";
-    p.label(name, 44, 14, { fill: "#6b7280" });
-    if (mode !== "episode" || series.length === 0) {
-      if (mode !== "episode") p.label("no ground truth in this mode", 44, 30, { fill: "#9ca3af" });
+    if (mode !== "episode") {
+      p.label("no ground truth in this mode", 36, 14, { fill: "#9ca3af" });
       return;
     }
-    p.line(series.map((s) => s.t), series.map((s) => s.v), usePred ? "#2563eb" : "#ea580c", 1.4);
-    p.dots(series.map((s) => [s.t, s.v] as [number, number]), usePred ? "#2563eb" : "#ea580c", 2);
+    if (goal.pred) {
+      p.label("RMSE vs steps", 36, 14, { fill: "#2563eb" });
+      p.line(history.map((h) => h.t), history.map((h) => h.rmse), "#2563eb", 1.4);
+      p.dots(history.map((h) => [h.t, h.rmse] as [number, number]), "#2563eb", 2);
+      return;
+    }
+    const names = { ell: "log q(ℓ)", scale: "log q(σ)", kernel: "log q(kernel)" };
+    seriesKeys.forEach((k, i) => {
+      p.label(names[k], 36, 14 + 17 * i, { fill: LATENT_COLOR[k] });
+      p.line(history.map((h) => h.t), history.map((h) => h[k]), LATENT_COLOR[k], 1.4);
+      p.dots(history.map((h) => [h.t, h[k]] as [number, number]), LATENT_COLOR[k], 2);
+    });
   }
 
   function yDomainOf(vals: number[]): [number, number] {
@@ -626,42 +652,51 @@ export async function mountAline(el: HTMLElement): Promise<void> {
     return [lo - pad, hi + pad];
   }
 
-  function drawGoalPanel(): void {
-    const showEll = goal.ell;
-    const showScale = !showEll && goal.scale;
-    if (lastStep && (showEll || showScale)) {
-      const d = showEll ? lastStep.ell : lastStep.scale;
-      const peak = Math.max(...d.probs, 1e-12);
-      const p = makePlot(goalCanvas, {
-        xDomain: [d.grid[0], d.grid[d.grid.length - 1]],
-        yDomain: [0, 1.15 * peak],
-        padding: { l: 10, r: 8, t: 8, b: 16 },
-      });
-      p.clear();
-      p.axes();
-      p.line(d.grid, d.probs, "#9333ea", 1.5);
-      const name = showEll ? "log-lengthscale posterior" : "log-outputscale posterior";
-      p.label(name, 16, 14, { fill: "#6b7280" });
-      if (mode === "episode" && draw && revealTruth) {
-        p.vline(showEll ? draw.logEll : draw.logScale, "rgba(107,114,128,0.8)", 1.2, [4, 3]);
-      }
-      return;
+  function drawLatentsPanel(): void {
+    // Both continuous latent posteriors on one panel (they are always computed);
+    // the goal-selected ones draw bold, the others dimmed.
+    const ellMeta = model.variables[1];
+    const scaleMeta = model.variables[2];
+    const dE = lastStep?.ell;
+    const dS = lastStep?.scale;
+    const peak = Math.max(...(dE?.probs ?? [0]), ...(dS?.probs ?? [0]), 1e-12);
+    const p = makePlot(latentsCanvas, {
+      xDomain: [Math.min(ellMeta.bound_lo, scaleMeta.bound_lo), Math.max(ellMeta.bound_hi, scaleMeta.bound_hi)],
+      yDomain: [0, 1.15 * peak],
+      padding: { l: 8, r: 6, t: 8, b: 14 },
+    });
+    p.clear();
+    p.axes();
+    if (dS) p.line(dS.grid, dS.probs, goal.scale ? LATENT_COLOR.scale : LATENT_DIM.scale, goal.scale ? 2 : 1.2);
+    if (dE) p.line(dE.grid, dE.probs, goal.ell ? LATENT_COLOR.ell : LATENT_DIM.ell, goal.ell ? 2 : 1.2);
+    p.label(`log ℓ${goal.ell ? " (goal)" : ""}`, 14, 14, { fill: LATENT_COLOR.ell });
+    p.label(`log σ${goal.scale ? " (goal)" : ""}`, 14, 31, { fill: LATENT_COLOR.scale });
+    if (mode === "episode" && draw && revealTruth) {
+      p.vline(draw.logEll, LATENT_COLOR.ell, 1, [4, 3]);
+      p.vline(draw.logScale, LATENT_COLOR.scale, 1, [4, 3]);
     }
-    // Fallback: the kernel posterior as bars (always available).
+  }
+
+  function drawKernelPanel(): void {
     const probs = lastStep ? lastStep.kernelProbs : [0, 0, 0, 0];
-    const p = makePlot(goalCanvas, {
+    const p = makePlot(kernelCanvas, {
       xDomain: [-0.6, probs.length - 0.4],
       yDomain: [0, 1.05],
-      padding: { l: 10, r: 8, t: 8, b: 16 },
+      padding: { l: 8, r: 6, t: 8, b: 16 },
     });
     p.clear();
     p.axes();
     for (let i = 0; i < probs.length; i++) {
       const isTruth = mode === "episode" && draw !== null && revealTruth && draw.kernel === i;
-      p.rectData(i - 0.32, i + 0.32, 0, probs[i], isTruth ? "rgba(22,163,74,0.55)" : "rgba(147,51,234,0.45)");
-      p.label(KERNEL_LABELS[i], p.xPx(i) - 18, p.height - 8, { fill: "#6b7280" });
+      const fill = isTruth
+        ? "rgba(22,163,74,0.55)"
+        : goal.kernel
+          ? "rgba(100,116,139,0.6)"
+          : "rgba(100,116,139,0.3)";
+      p.rectData(i - 0.32, i + 0.32, 0, probs[i], fill);
+      p.label(KERNEL_SHORT[i], p.xPx(i) - 10, p.height - 8, { fill: "#6b7280" });
     }
-    p.label(goal.kernel ? "kernel posterior (goal)" : "kernel posterior", 16, 14, { fill: "#6b7280" });
+    p.label(`kernel${goal.kernel ? " (goal)" : ""}`, 14, 14, { fill: LATENT_COLOR.kernel });
   }
 
   // --- boot ---

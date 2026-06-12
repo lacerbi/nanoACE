@@ -78,7 +78,9 @@ export interface AlineStep {
   ell: Density;
   scale: Density;
   kernelProbs: number[];
-  metrics?: { rmse: number; logqTheta: number }; // present iff truth given
+  // Present iff truth given: predictive RMSE on gridX + per-latent log q(θ_true)
+  // (ξ-independent instruments, so metric series stay comparable across goal switches).
+  metrics?: { rmse: number; logq: { ell: number; scale: number; kernel: number } };
 }
 
 /** Index of the available candidate nearest to x (the click-snap rule). */
@@ -186,12 +188,10 @@ export function alineStep(model: ALINEModel, inp: AlineInputs, truth?: Truth): A
       se += d * d;
     }
     const rmse = Math.sqrt(se / inp.gridX.length);
-    // Mean log q(θ_true) over all three latents (a ξ-independent instrument,
-    // so the metric series stays comparable across mid-episode goal switches).
     const lpEll = pred.logProbContinuous(ellRow, encodeValue(model.variables[1], truth.logEll));
     const lpScale = pred.logProbContinuous(scaleRow, encodeValue(model.variables[2], truth.logScale));
     const lpKernel = Math.log(Math.max(kernelProbs[truth.kernel] ?? 0, 1e-300));
-    metrics = { rmse, logqTheta: (lpEll + lpScale + lpKernel) / 3 };
+    metrics = { rmse, logq: { ell: lpEll, scale: lpScale, kernel: lpKernel } };
   }
 
   return { bandMean, bandStd, candVar, logits, policyProbs, argmaxIdx, usIdx, ell, scale, kernelProbs, metrics };
