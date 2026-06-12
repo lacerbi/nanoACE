@@ -1,12 +1,11 @@
 # aline — joint amortized inference + active data acquisition for nanoACE
 
-A **non-core extension** that implements ALINE — Huang, Wen, Bharti, Kaski &
+An extension that implements ALINE — Huang, Wen, Bharti, Kaski &
 Acerbi (2025), *ALINE: Joint Amortization for Bayesian Inference and Active
 Data Acquisition* (NeurIPS 2025;
-[arXiv:2506.07259](https://arxiv.org/abs/2506.07259)) — on top of an
-**unchanged** nanoACE model, on the paper's GP active-learning task (§4.1).
-Paper markdown lives in the (gitignored) `temp/` folder on the development
-machine.
+[project page](https://www.huangdaolang.com/aline/)) — on top of an
+unchanged nanoACE model, on the paper's GP active-learning task (§4.1).
+Local paper markdown is in [paper/](paper/).
 
 ALINE couples two things in one network: an amortized inference model `q_φ`
 (posteriors over latents, predictive distributions over data) and an
@@ -138,11 +137,11 @@ gate readings and interpretation live in [DEVLOG.md](DEVLOG.md).
 
 ## Boundary
 
-Like `playground/`, this folder is **not part of the core**: `ace.py`,
-`train.py`, `gp1d.py`, and the examples are unchanged and never import it.
-Like `arbuffer/` it is torch-only and *may* reach into core internals — it
-subclasses `ACE`, calls `_embed`, and re-runs the core block loop in
-`forward_with_states` — with the parity check keeping that coupling honest:
+The core is unchanged: `ace.py`, `train.py`, `gp1d.py`, and the examples
+never import this folder. The extension is torch-only and reaches into core
+internals — it subclasses `ACE`, calls `_embed`, and re-runs the core block
+loop in `forward_with_states` — with the parity check keeping that coupling
+honest:
 the inference path must equal the base `ACE` forward **bitwise**. The
 assertion fires at every warm start (and in the phase-1 checks); the property
 itself persists afterwards by construction, since the policy is read-only and

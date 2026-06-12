@@ -91,7 +91,7 @@ const EXPLAINER = {
     still competitive on pure prediction, and the goal-targeting differences can be
     subtle.</p>
     ${aceFooter(
-      'The acquisition policy follows Huang, Wen, Bharti, Kaski &amp; Acerbi (2025), <em>ALINE: Joint Amortization for Bayesian Inference and Active Data Acquisition</em> (NeurIPS 2025) — <a href="https://arxiv.org/abs/2506.07259">arXiv:2506.07259</a>.',
+      'The acquisition policy follows Huang, Wen, Bharti, Kaski &amp; Acerbi (2025), <em>ALINE: Joint Amortization for Bayesian Inference and Active Data Acquisition</em> (NeurIPS 2025) — <a href="https://www.huangdaolang.com/aline/">project page</a>.',
     )}`,
 };
 
