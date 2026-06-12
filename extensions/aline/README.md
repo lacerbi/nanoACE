@@ -2,8 +2,8 @@
 
 A **non-core extension** that implements ALINE — Huang, Wen, Bharti, Kaski &
 Acerbi (2025), *ALINE: Joint Amortization for Bayesian Inference and Active
-Data Acquisition* (NeurIPS 2025; [reference
-implementation](https://github.com/huangdaolang/aline)) — on top of an
+Data Acquisition* (NeurIPS 2025;
+[arXiv:2506.07259](https://arxiv.org/abs/2506.07259)) — on top of an
 **unchanged** nanoACE model, on the paper's GP active-learning task (§4.1).
 Paper markdown lives in the (gitignored) `temp/` folder on the development
 machine.
