@@ -25,7 +25,7 @@ import { Predictions } from "../ace/predictions";
 import { mulberry32 } from "../ace/rng";
 import type { TokenSet } from "../ace/model";
 import { type Manifest, weightsFromBytes } from "../ace/weights";
-import { JointSampler } from "./infer";
+import { JointSampler, SlowARSampler } from "./infer";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MODEL_DIR = join(ROOT, "public", "models", "gp1d_arbuffer");
@@ -192,6 +192,30 @@ describe.skipIf(!HAVE)("arbuffer parity: gp1d_arbuffer", () => {
     sampler.runAll();
     check("chain/values", sampler.values, c.values, 0, 0);
     check("chain/log_prob", sampler.logps, c.log_prob, DERIVED.atol, DERIVED.rtol);
+  });
+
+  it("slow-AR sampler: deterministic, first step matches the context-only conditional", () => {
+    const c = fx.chain;
+    const context = toTokenSet(c.context);
+    const cache = model.encodeContext(context);
+    const opts = { nDraws: 2, rng: mulberry32(0), order: c.order, teacher: c.values };
+    const slow = new SlowARSampler(model, context, c.grid, { ...opts, rng: mulberry32(0) });
+    slow.runAll();
+    const joint = new JointSampler(model, cache, c.grid, { ...opts, rng: mulberry32(0) });
+    joint.runAll();
+    // Before anything is appended, both samplers score the same context-only
+    // conditional (empty buffer ≡ bare context); afterwards the conditionals
+    // legitimately differ (buffer read vs re-encoded context).
+    const j0 = c.order[0];
+    for (let b = 0; b < 2; b++) {
+      expect(Math.abs(slow.logps[b][j0] - joint.logps[b][j0])).toBeLessThan(1e-6);
+    }
+    const run = (seed: number) => {
+      const s = new SlowARSampler(model, context, c.grid, { nDraws: 1, rng: mulberry32(seed) });
+      s.runAll();
+      return s.values;
+    };
+    expect(run(7)).toEqual(run(7));
   });
 
   it("sampling is seed-deterministic", () => {

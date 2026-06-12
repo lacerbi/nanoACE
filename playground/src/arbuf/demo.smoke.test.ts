@@ -70,6 +70,12 @@ describe.skipIf(!HAVE)("AR-buffer demo UI smoke", () => {
     expect(modal.hidden).toBe(false);
     modal.querySelector<HTMLButtonElement>(".ace-modal-close")!.click();
     expect(modal.hidden).toBe(true);
+
+    // The sampler toggle exists; not exercised here — a synchronous slow-AR
+    // decode (1 × 64 full re-encodes) is too slow for a smoke test. The
+    // SlowARSampler itself is covered in parity.test.ts.
+    expect(el.querySelector(".ab-mode-buffer")).not.toBeNull();
+    expect(el.querySelector(".ab-mode-slow")).not.toBeNull();
   });
 });
 

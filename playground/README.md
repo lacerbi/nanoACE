@@ -28,7 +28,9 @@ Five demos:
   edit context points / pin latents like the GP tab, then watch a few
   **coherent joint function draws** decode autoregressively from one cached
   context encoding (animated), next to the diagonal band and independent
-  per-point marginal samples. The weights are the retained 200k concat-read
+  per-point marginal samples. A sampler toggle reruns the chain as slow AR
+  (full context re-encoding per step, one draw) so the per-draw cost
+  difference is felt directly. The weights are the retained 200k concat-read
   fine-tune (K=64, joint training); the tab and its tests self-skip/notice
   gracefully when the blob is absent locally.
 

@@ -36,6 +36,16 @@ all tests green at the same tolerances). The in-tab model-provenance note was re
 (user decision: not something the tab's audience needs; provenance lives in the docs).
 Deployed 2026-06-12 (after the org move to `acerbilab`): blob published to the weights
 repo, `pages.yml` expects five models, "local-only" framing retired from the docs.
+Added 2026-06-12 (user request): a slow-AR sampler toggle — `SlowARSampler` in
+`infer.ts` (same step-driveable `ChainSampler` interface, so the animation loop is
+shared), one draw (`ARBUF.SLOW_DRAWS`), per-draw timing in the status line for a
+direct comparison; covered by a unit test (determinism + step-0 equivalence to the
+context-only conditional), not by the smoke test (a synchronous 64-step re-encode
+chain is too slow for CI smoke).
+Removed 2026-06-12 (user decision): the "animate the AR decode" checkbox — the
+synchronous instant path was strictly worse UX (blocks per interaction, jelly
+dragging, frozen multi-second slow-AR runs with no cancel), so the decode now always
+animates; a future "skip" would be a faster STEPS_PER_FRAME, not a sync path.
 Also added (separate small feature): per-tab "?" explainer modals via
 `playground/src/explain.ts`. The fixed grid moved 32 → **64** (user decision) to match
 the retained fine-tune's K=64 — a 64-step chain exercises exactly the trained prefix

@@ -28,6 +28,11 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   and `pages.yml` now copies/validates five models. The tests' self-skip behavior
   stays (clones without local exports skip the arbuf suites), and in CI the blob is
   present so they run.
+- **Slow-AR toggle in the AR-buffer tab.** A sampler radio reruns the chain via full
+  context re-encoding (`sample_ar`'s recipe through the plain forward) with a single
+  draw; the timing line reports cost *per draw* so the two modes compare directly
+  (~20× slower per draw at 4 context points and K=64, growing with context size and
+  chain length). Deliberately didactic: same model, same factorization, no cache.
 
 ---
 

@@ -21,8 +21,10 @@ import {
   buildContext,
   JointSampler,
   sampleIndependent,
+  SlowARSampler,
   type ArbufSpec,
   type ArbufStatic,
+  type ChainSampler,
 } from "./infer";
 
 interface Point {
@@ -62,9 +64,11 @@ const EXPLAINER = {
     <p>The factorization is identical; the cost is not. Re-encoding costs O(K·(N+K)²) attention
     work over a K-step chain; the buffer costs O(N² + K·(N+K)). In this page's implementation
     that is the difference between several seconds and a fraction of a second per resample —
-    it is what makes the tab interactive. The model is a fine-tuned extension of the GP-1D
-    model (the buffer stream is the new part; the blue band is its ordinary marginal
-    prediction), so pinned latents condition the draws too.</p>
+    it is what makes the tab interactive. You can feel it yourself: the sampler toggle under
+    <em>sampling</em> runs the re-encoding variant live (a single draw; the line below the
+    plot reports cost per draw, so the two modes compare directly). The model is a
+    fine-tuned extension of the GP-1D model (the buffer stream is the new part; the blue
+    band is its ordinary marginal prediction), so pinned latents condition the draws too.</p>
     ${aceFooter(
       // OpenReview link is deliberate for now; switch to the paper's project page later.
       'The buffer mechanism follows Hassan et al. (2026), <em>Efficient Autoregressive Inference for Transformer Probabilistic Models</em> (ICLR 2026) — <a href="https://openreview.net/forum?id=5bfUqlOhAH">OpenReview</a>.',
@@ -138,7 +142,7 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
   const pin: PinState = { kernel: null, ell: false, scale: false };
   let ellVal = 0.5 * (ellMeta.bound_lo + ellMeta.bound_hi);
   let scaleVal = 0.5 * (scaleMeta.bound_lo + scaleMeta.bound_hi);
-  let animate = true;
+  let samplerMode: "buffer" | "slow" = "buffer";
   let dragIdx: number | null = null;
   let seedCounter = 0;
 
@@ -146,7 +150,7 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
   let cache: CtxCache | null = null;
   let stat: ArbufStatic | null = null;
   let indep: number[][] = [];
-  let sampler: JointSampler | null = null;
+  let sampler: ChainSampler | null = null;
   let encodeMs = 0;
   let decodeMs = 0;
   let epoch = 0; // bumped to cancel stale animation loops
@@ -183,9 +187,10 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
         </fieldset>
         <fieldset>
           <legend>sampling</legend>
-          <div class="ab-slider-row">
-            <button class="ab-btn ab-resample">Resample</button>
-            <label class="ab-slider-row"><input type="checkbox" class="ab-animate" checked/>animate the AR decode</label>
+          <label class="ab-slider-row"><input type="radio" name="ab-sampler" class="ab-mode-buffer" checked/>AR buffer (context cached)</label>
+          <label class="ab-slider-row"><input type="radio" name="ab-sampler" class="ab-mode-slow"/>slow AR (re-encodes every step)</label>
+          <div class="ab-btns">
+            <button class="ab-btn ab-resample" title="Reuses the cached context encoding (AR buffer) — only the decode reruns">Resample</button>
           </div>
         </fieldset>
         <div class="ab-btns">
@@ -207,7 +212,16 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
   const scaleValEl = root.querySelector<HTMLSpanElement>(".scale-val")!;
   const pinEll = root.querySelector<HTMLInputElement>(".pin-ell")!;
   const pinScale = root.querySelector<HTMLInputElement>(".pin-scale")!;
-  const animateBox = root.querySelector<HTMLInputElement>(".ab-animate")!;
+  const modeBuffer = root.querySelector<HTMLInputElement>(".ab-mode-buffer")!;
+  const modeSlow = root.querySelector<HTMLInputElement>(".ab-mode-slow")!;
+  const resampleBtn = root.querySelector<HTMLButtonElement>(".ab-resample")!;
+
+  function updateResampleTitle(): void {
+    resampleBtn.title =
+      samplerMode === "buffer"
+        ? "Reuses the cached context encoding (AR buffer) — only the decode reruns"
+        : "Slow AR: no cache — the context is re-encoded at every step";
+  }
 
   const kernelOptions = ["Unknown", ...KERNEL_LABELS];
   const kernelButtonEls: HTMLButtonElement[] = [];
@@ -249,8 +263,19 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
     pin.scale = pinScale.checked;
     onContextChange();
   });
-  animateBox.addEventListener("change", () => {
-    animate = animateBox.checked;
+  modeBuffer.addEventListener("change", () => {
+    if (modeBuffer.checked) {
+      samplerMode = "buffer";
+      updateResampleTitle();
+      resample();
+    }
+  });
+  modeSlow.addEventListener("change", () => {
+    if (modeSlow.checked) {
+      samplerMode = "slow";
+      updateResampleTitle();
+      resample();
+    }
   });
   root
     .querySelector<HTMLButtonElement>(".ab-resample")!
@@ -364,19 +389,18 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
     const myEpoch = epoch;
     const rng = mulberry32(SEED0 + seedCounter++);
     indep = sampleIndependent(stat, ARBUF.DRAWS, rng);
-    sampler = new JointSampler(model, cache, stat.grid, {
-      nDraws: ARBUF.DRAWS,
-      rng,
-    });
+    sampler =
+      samplerMode === "buffer"
+        ? new JointSampler(model, cache, stat.grid, {
+            nDraws: ARBUF.DRAWS,
+            rng,
+          })
+        : new SlowARSampler(model, buildContext(model, spec()), stat.grid, {
+            nDraws: ARBUF.SLOW_DRAWS,
+            rng,
+          });
     decodeMs = 0;
 
-    if (!animate) {
-      const t0 = performance.now();
-      sampler.runAll();
-      decodeMs = performance.now() - t0;
-      draw();
-      return;
-    }
     const tick = () => {
       if (myEpoch !== epoch || !sampler) return;
       const t0 = performance.now();
@@ -497,10 +521,11 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
       4,
     );
     mainPlot.axes();
+    const b = sampler.values.length;
     mainPlot.label("diagonal ±2σ (context only)", 50, 16, { fill: "#2563eb" });
     mainPlot.label("independent marginal samples", 50, 30, { fill: "#6b7280" });
     mainPlot.label(
-      `${sampler.values.length} coherent draws (AR buffer)`,
+      `${b} coherent draw${b === 1 ? "" : "s"} (${samplerMode === "buffer" ? "AR buffer" : "slow AR"})`,
       50,
       44,
       { fill: DRAW_COLORS[0] },
@@ -514,12 +539,14 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
     );
 
     const k = stat.grid.length;
-    const stepsDone = sampler.steps;
-    const decoding = sampler.done ? "" : ` (decoding ${stepsDone}/${k}…)`;
+    const decoding = sampler.done ? "" : ` (decoding ${sampler.steps}/${k}…)`;
+    const perDraw = sampler.steps > 0 ? ` (≈${(decodeMs / b).toFixed(0)} ms per draw)` : "";
     statusEl.textContent =
-      `context encoded once: ${encodeMs.toFixed(1)} ms · ` +
-      `decode ${sampler.values.length} × ${k} steps: ${decodeMs.toFixed(0)} ms${decoding} · ` +
-      `Resample reuses the cached encoding`;
+      samplerMode === "buffer"
+        ? `context encoded once: ${encodeMs.toFixed(1)} ms · ` +
+          `decode ${b} × ${k} steps: ${decodeMs.toFixed(0)} ms${perDraw}${decoding}`
+        : `slow AR — context re-encoded at every step · ` +
+          `${b} × ${k} steps: ${decodeMs.toFixed(0)} ms${perDraw}${decoding}`;
   }
 
   onContextChange();

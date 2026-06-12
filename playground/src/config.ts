@@ -65,6 +65,7 @@ export const ARBUF = {
   // (but could not learn from) contexts up to 20, so the hint stays conservative.
   MAX_CONTEXT_HINT: 14,
   DRAWS: 3, // coherent draw streams (and independent-sample lines)
+  SLOW_DRAWS: 1, // draws in slow-AR mode (re-encoding is ~50x the per-draw cost; timing line compares per draw)
   GRID_POINTS: 64, // fixed chain length = the retained fine-tune's K=64 (prefixes 0..63 all trained)
   STEPS_PER_FRAME: 1, // decode steps per animation frame (64 steps ≈ one second)
   HIT_RADIUS_PX: 12,
