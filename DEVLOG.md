@@ -9,6 +9,28 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
 
 ---
 
+## 2026-06-12 — ALINE playground tab (local-only)
+
+- **The playground gained a sixth tab** running `extensions/aline/` in-browser:
+  a hidden GP function (an exact float64 TS port of the gp1d DGP, fixture-pinned
+  against `gp1d.draw_gp`) answers queries; the user only chooses *where* to
+  sample, with the learned acquisition policy rendered as advice — π(x | data,
+  goal) along the x-axis next to the classical uncertainty-sampling pick — a
+  live goal selector (predictive vs latent subsets, mid-episode switches,
+  novel combos flagged), "Follow policy" auto-unrolling, and RMSE /
+  log q(θ_true) tracked against the hidden truth. A secondary "your own data"
+  mode keeps the advice live on free-edited points. The TS port adds a policy
+  decoder on top of the untouched base port (final-state reads from the
+  inherited forward; omission ≡ masking equivalences), parity-pinned per
+  policy block plus a teacher-forced episode chain. **Local-only**: the deploy
+  workflow is untouched; the 5k validation checkpoint serves the tab until the
+  longer fine-tune lands (then re-export + regenerate fixtures together, push
+  the blob, add `gp1d_aline` to pages.yml's two lists). Plan + verification:
+  [docs/plans/PLAN-aline-playground.md](docs/plans/PLAN-aline-playground.md);
+  TS deviations + eyeball notes in `extensions/aline/DEVLOG.md`.
+
+---
+
 ## 2026-06-12 — ALINE extension (`extensions/aline/`): joint amortized inference + active acquisition
 
 - **Second `extensions/` entry: `extensions/aline/`** — ALINE (Huang et al., 2025,

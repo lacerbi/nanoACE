@@ -76,7 +76,8 @@ Implemented modules:
   SIR, and BO-1D, with interactive conditioning, latent/prior controls, and
   oracle overlays where practical. BO-1D stays no-oracle and overlays
   optimum-location/value marginals on the editable regression plot. A fifth
-  tab runs the AR-buffer extension's coherent joint sampling (see below).
+  tab runs the AR-buffer extension's coherent joint sampling, and a sixth
+  (local-only) runs the ALINE extension's active-learning loop (see below).
   See [playground/README.md](playground/README.md). The Python core stays
   torch-only; the playground is an example built on a parity-tested TS port of
   `ace.py`'s forward pass.
@@ -102,7 +103,10 @@ Implemented modules:
   decoder that scores a candidate pool, trained with REINFORCE on
   self-estimated information gain, with a structural gradient firewall between
   the two. The inference path is asserted bit-equal to the base ACE forward.
-  See [extensions/aline/README.md](extensions/aline/README.md).
+  A **local-only** playground tab runs the full acquisition loop in-browser
+  against a hidden GP function (the user picks where to sample; the policy
+  advises; goals switch live). See
+  [extensions/aline/README.md](extensions/aline/README.md).
 - [DEVLOG.md](DEVLOG.md): design decisions and rationale. Read this before
   changing architecture or scope.
 

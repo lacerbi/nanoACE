@@ -180,9 +180,12 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
 - **`playground/` is a non-core example, not part of the core.** It is a Vite + TypeScript
   in-browser demo that reimplements `ace.py`'s forward pass in TS (parity-tested against
   the PyTorch model) so trained checkpoints run client-side. Current tabs cover GP-1D,
-  Gaussian, SIR, BO-1D, and an AR-buffer joint-sampling tab (the
+  Gaussian, SIR, BO-1D, an AR-buffer joint-sampling tab (the
   `extensions/arbuffer/` model through a parity-tested TS port of its incremental
-  sampler; its tests self-skip when the local blob is absent). The core stays
+  sampler; its tests self-skip when the local blob is absent), and a **local-only**
+  ALINE active-learning tab (the `extensions/aline/` model + a fixture-pinned TS
+  port of the gp1d DGP as the hidden-function environment; same self-skip
+  discipline, not in the deploy workflow). The core stays
   torch-only and legible; do not let the JS toolchain or
   web concerns bleed into `ace.py` or the examples.
   User-facing playground text (hints, explainer modals, README) is didactic and
@@ -209,4 +212,4 @@ prior, mode, mask`). `Batch` = `variables + context: Tokens + target: Tokens`. D
   candidate pool trained with REINFORCE on self-estimated information gain. Alternating
   NLL/policy phases with a structural φ/ψ gradient firewall; the inference path is
   asserted bit-equal to the base ACE forward (a permanent parity guard, not just
-  step-0).
+  step-0). A local-only playground tab runs its acquisition loop in-browser.

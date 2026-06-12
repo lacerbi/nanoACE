@@ -12,6 +12,52 @@ implementation was consulted from a clone in `temp/aline-repo/`.
 
 ---
 
+## 2026-06-12 — Playground tab (TS port; local-only against the 5k artifact)
+
+The playground gained a sixth tab running this extension in-browser (plan +
+verification: `docs/plans/PLAN-aline-playground.md`). Interaction model: a
+hidden GP function — sampled client-side by an exact float64 port of the gp1d
+DGP — answers every query; the user only chooses *where* to sample, with the
+policy's π(x | D, ξ) rendered as advice next to an uncertainty-sampling
+marker; "Follow policy" unrolls the episode; the goal selector is live,
+including mid-episode switches. Local-only: not in the deploy workflow; the
+5k validation checkpoint serves it until the longer fine-tune lands (swap =
+re-run export + parity together).
+
+Recorded TS deviations / equivalences (all parity-pinned):
+
+- **Final-state reads come from the inherited TS forward**, not a re-run
+  block loop: the base port already returns per-layer stacks, so
+  `forwardWithStates` is `ctxLayers[L-1]` plus `final_norm` re-applied to
+  `tgtLayers[L-1]` — the exact values Python's `forward_with_states` returns
+  (the policy fixture asserts the states directly).
+- **Omission replaces masking, exactly.** Target tokens never attend to each
+  other and candidates are scored pointwise, so the TS side builds only the
+  active goal tokens and only the available candidates; ξ is "which target
+  rows exist", and the policy reads a goal-row *slice* of one shared forward
+  that also carries band, all-three-latent, and US-candidate rows (row
+  independence makes the extra rows invisible; the all-three-latent rows are
+  a tab refinement so marginals and a ξ-independent log q(θ_true) metric
+  survive goal switches).
+- **The chain fixture is teacher-forced**: the TS test replays Python's
+  recorded argmax actions and asserts logits/log-probs, so an fp near-tie
+  cannot flip an action and fail the build (agreement is reported instead).
+- **The env's RNG streams are not parity-matched** (mulberry32 vs torch);
+  the fixtures pin the deterministic math (K, Cholesky) instead, and the
+  teacher-forced chain carries Python-drawn values.
+
+Eyeball notes on the 5k policy (honest reading, not a gate): the loop works
+end-to-end at ~150–200 ms/step (Edge, this workstation); log q(θ_true) and
+RMSE improve over an episode; and goal-dependent placement is *visible* —
+under ξ = ℓ the policy concentrates its mass immediately beside already-
+acquired points (the tight-local-pairs strategy lengthscale information
+wants), clearly separated from the uncertainty-sampling pick, while under
+ξ = predictive it spreads toward coverage. Consistent with the 5k evaluation:
+placement differs by goal even though the measured log-q contrasts are still
+null at this budget. The tab's didactics were not tuned to this checkpoint.
+
+---
+
 ## 2026-06-12 — 5k validation run: the policy learns; US gap and null ℓ-contrast
 
 First validation fine-tune from the retained GP-1D 200k checkpoint: 5k episode

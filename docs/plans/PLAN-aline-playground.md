@@ -1,7 +1,10 @@
 # Plan: ALINE active-learning playground tab
 
 Created: 2026-06-12
-Status: IN PROGRESS (approved 2026-06-12; doublecheck pass with fixes applied same day)
+Status: COMPLETE (2026-06-12; all six phases done — plan doublecheck with fixes
+pre-approval, docs-focused pass after Phase 1, full verification in Phase 6.
+Remaining follow-up lives outside this plan: the longer fine-tune, then the
+mechanical weights swap + deploy recorded under Out-of-scope below).
 
 Reference: Huang, Wen, Bharti, Kaski & Acerbi (2025), *ALINE: Joint Amortization for
 Bayesian Inference and Active Data Acquisition* (NeurIPS 2025). Extension under
@@ -148,19 +151,24 @@ still reads only the ξ rows]
       slow for a smoke test, and Step covers the same applyAction path; skip-guarded)
       + the missing-model notice test (NOT skip-guarded, arbuffer precedent)
 
-Phase 6 — verification + docs wrap:
-- [ ] full `npm test` green twice: with the local blob (all aline suites run) and
-      with it temporarily renamed away (aline suites skip; notice test still runs)
-- [ ] deploy safety: `.github/workflows/pages.yml` untouched (`git diff` clean on it);
-      `gp1d_aline` absent from both hardcoded task lists
-- [ ] eyeball the tab against the 5k weights; record observed policy behavior
-      honestly (placement differences by goal, or their absence) in the extension
-      DEVLOG entry — not in marketing terms in the UI
-- [ ] docs: `playground/README.md` (sixth demo bullet + export command + local-only/
-      self-skip note); root `DEVLOG.md` dated entry (tab, local-only, pointer here);
-      `extensions/aline/DEVLOG.md` dated entry (TS port deviations, Design 4/5
-      equivalences, eyeball notes); root `README.md` playground/extension bullets
-      updated to mention the tab; this plan's tracker + status
+Phase 6 — verification + docs wrap:  [DONE 2026-06-12]
+- [x] full `npm test` green twice: with the local blob (14 files / 37 tests pass) and
+      with it temporarily renamed away (33 pass / 4 skip — the env suite, the loader
+      rejection, and the notice test all still run)
+- [x] deploy safety: `.github/workflows/pages.yml` untouched (`git diff` clean on it);
+      `gp1d_aline` absent from both hardcoded task lists; production `vite build` clean
+- [x] eyeball the tab against the 5k weights (headless Edge via playwright-core,
+      screenshots in `artifacts/aline_tab_*.png`): episode loop end-to-end at
+      ~150–200 ms/step; goal-dependent placement VISIBLE (ξ=ℓ concentrates mass
+      beside acquired points — tight local pairs — clearly separated from the US
+      pick; ξ=pred spreads to coverage); metrics climb; the one console error is the
+      pre-existing favicon 404. Honest notes recorded in the extension DEVLOG
+- [x] docs: `playground/README.md` (sixth demo bullet + export command + local-only/
+      self-skip note + parity/how-it-works sections); root `DEVLOG.md` dated entry
+      (tab, local-only, pointer here); `extensions/aline/DEVLOG.md` dated entry
+      (TS port deviations, Design 4/5 equivalences, eyeball notes); root
+      `README.md`/`AGENTS.md` playground + extension mentions updated; this plan's
+      tracker + status
 
 ## Scope
 
