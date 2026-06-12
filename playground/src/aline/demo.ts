@@ -171,11 +171,8 @@ export async function mountAline(el: HTMLElement): Promise<void> {
   root.innerHTML = `
     <p class="al-hint">Active learning with ALINE
       (<a href="https://github.com/acerbilab/nanoACE/tree/main/extensions/aline">extensions/aline</a>):
-      the app has drawn a random function and keeps it hidden. Click the plot to
-      measure it at that location — each click reveals one true value and the model
-      updates its predictions. The orange curve along the bottom shows where ALINE's
-      learned policy would measure next for the selected goal: click there yourself,
-      press Step, or press Follow policy. You can change the goal at any time.</p>
+      click to measure a hidden function — the orange curve shows where the learned
+      policy would measure next for the selected goal.</p>
     <div class="al-top">
       <div class="al-plot-col">
         <canvas class="al-main" width="660" height="380" style="width:660px;height:380px;"></canvas>
