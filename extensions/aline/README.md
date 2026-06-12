@@ -148,3 +148,9 @@ assertion fires at every warm start (and in the phase-1 checks); the property
 itself persists afterwards by construction, since the policy is read-only and
 writes nothing back into the trunk. `aline.py` is task-agnostic (it knows
 `ace.py`, not `gp1d.py`); everything GP-specific lives in `gp1d_aline.py`.
+
+A **local-only** playground tab runs this model's full acquisition loop
+in-browser (hidden GP function, user-chosen or policy-driven queries, live
+goal switching) — see `playground/README.md` and
+[docs/plans/PLAN-aline-playground.md](../../docs/plans/PLAN-aline-playground.md);
+TS-port design notes are in the local [DEVLOG.md](DEVLOG.md).
