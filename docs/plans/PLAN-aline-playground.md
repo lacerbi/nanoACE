@@ -42,12 +42,15 @@ Boundary; these tracker ticks) fixed]
       is owned here as a **docs-focused** pass over the Phase 1 surface (the
       implementation itself already had the Phase 4.5 three-reviewer pass)
 
-Phase 2 — Python side: export task + parity/env fixtures:
-- [ ] `playground/export_weights.py`: add `"gp1d_aline": "extensions.aline.gp1d_aline"`
+Phase 2 — Python side: export task + parity/env fixtures:  [DONE 2026-06-12; all
+in-script asserts passed (forward_with_states bit-equal to forward; manual policy
+replication bit-equal to policy_logits); 178 tensors / 48 policy tensors exported,
+byte-size check exact; pre-existing tracked fixtures byte-identical after the rerun]
+- [x] `playground/export_weights.py`: add `"gp1d_aline": "extensions.aline.gp1d_aline"`
       to `TASK_MODULES` (the generic state-dict walk already serializes `policy_*`
       tensors; no manifest-field changes — model identity is key-presence, arbuffer
       precedent)
-- [ ] `playground/parity.py`: `ALINE_CKPT = artifacts/gp1d_aline.pt`; import
+- [x] `playground/parity.py`: `ALINE_CKPT = artifacts/gp1d_aline.pt`; import
       `load_aline_checkpoint`; gated fixture block writing
       `test/fixtures/gp1d_aline.parity.json` with three sections —
       `plain` (reuse `gp_cases(aline_model)`: the inherited-forward invariant on the
@@ -60,18 +63,18 @@ Phase 2 — Python side: export task + parity/env fixtures:
       — the TS test *replays* recorded actions rather than re-deriving argmax — and
       per-goal-token log-probs taken from `Predictions.log_prob` — NOT `rollout()`'s
       ξ-averaged `log_q`, which is a different quantity)
-- [ ] `playground/parity.py`: environment fixture `test/fixtures/gp1d_aline.env.json`,
+- [x] `playground/parity.py`: environment fixture `test/fixtures/gp1d_aline.env.json`,
       written on every `parity.py` run — placed **before** the `ALINE_CKPT.exists()`
       gate (independent of the ALINE checkpoint; `parity.py` as a whole still loads
       the four core checkpoints first, as today): for fixed input x-vectors (one
       moderate, one adversarial: clustered x + small ℓ + periodic), each kernel's K
       matrix and Cholesky factor in float64, plus the DGP constants (ranges, jitter,
       period) so the TS env is pinned to `gp1d.draw_gp` exactly
-- [ ] **both new fixtures are committed to git** (`gp1d_aline.parity.json`,
+- [x] **both new fixtures are committed to git** (`gp1d_aline.parity.json`,
       `gp1d_aline.env.json`; the blob dir stays gitignored) — the CI self-skip story
       and the always-running env suite depend on the fixtures being tracked, exactly
       as `gp1d_arbuffer.parity.json` is
-- [ ] export run: `python playground/export_weights.py --task gp1d_aline
+- [x] export run: `python playground/export_weights.py --task gp1d_aline
       --checkpoint artifacts/gp1d_aline.pt --out playground/public/models/gp1d_aline`;
       sanity: manifest lists `policy_blocks.*`/`policy_norm.*`/`policy_head.*` tensors,
       `total_floats` × 2 == weights.bin bytes
