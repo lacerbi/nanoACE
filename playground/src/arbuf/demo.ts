@@ -55,13 +55,13 @@ const EXPLAINER = {
     right pointwise but jump independently from point to point, because nothing ties
     neighboring values together.</p>
     <h3>What this tab is doing</h3>
-    <p>Joint samples come from the chain rule: predict one point, sample it, condition on
-    the realized value, move to the next — later points see the earlier draws, which is
+    <p>Joint samples come from the chain rule of probability: predict one point, sample it, 
+    condition on the realized value, move to the next — later points see the earlier draws, which is
     what creates the correlation. The standard implementation re-encodes the entire context
-    plus all realized points at every step. Our causal AR buffer instead encodes the
+    plus all realized points at every step. Our <em>causal autoregressive (AR) buffer</em> instead encodes the
     context once, caches it, and routes each realized sample through a separate causal
-    stream that later steps attend to. Each colored curve is one draw decoded against the
-    same cached encoding; Resample reuses the cache.</p>
+    stream that later steps attend to, with large savings in memory and compute. 
+    Each colored curve is one draw decoded against the same cached encoding; Resample reuses the cache.</p>
     <h3>Compared with the standard approach</h3>
     <p>Same factorization, different cost: re-encoding does O(K·(N+K)²) attention work over
     a K-point chain on N context tokens, the buffer O(N² + K·(N+K)) — in this page's
@@ -542,7 +542,8 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
 
     const k = stat.grid.length;
     const decoding = sampler.done ? "" : ` (decoding ${sampler.steps}/${k}…)`;
-    const perDraw = sampler.steps > 0 ? ` (≈${(decodeMs / b).toFixed(0)} ms per draw)` : "";
+    const perDraw =
+      sampler.steps > 0 ? ` (≈${(decodeMs / b).toFixed(0)} ms per draw)` : "";
     statusEl.textContent =
       samplerMode === "buffer"
         ? `context encoded once: ${encodeMs.toFixed(1)} ms · ` +

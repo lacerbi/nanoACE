@@ -7,8 +7,8 @@ implementation plan and verification log in `docs/plans/PLAN-aline.md`.
 
 Reference: Huang, Wen, Bharti, Kaski & Acerbi (2025), *ALINE: Joint Amortization
 for Bayesian Inference and Active Data Acquisition* (NeurIPS 2025). Paper
-markdown in the (gitignored) `temp/aline.md`; the released reference
-implementation was consulted from a clone in `temp/aline-repo/`.
+markdown in `paper/`; the released reference implementation was consulted from
+a local clone.
 
 ---
 

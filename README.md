@@ -81,7 +81,7 @@ Implemented modules:
   See [playground/README.md](playground/README.md). The Python core stays
   torch-only; the playground is an example built on a parity-tested TS port of
   `ace.py`'s forward pass.
-- [extensions/arbuffer/](extensions/arbuffer/): a **non-core** extension adding
+- [extensions/arbuffer/](extensions/arbuffer/): an extension adding
   the causal autoregressive buffer of Hassan et al. (2026) on top of a trained
   GP-1D checkpoint. Two target-read variants: a separate zero-init gated read
   (bit-exact warm start, frozen base) and the retained paper-style
@@ -94,7 +94,7 @@ Implemented modules:
   incremental sampler in the browser — the TS port follows the retained
   concat-read architecture and serves the retained 200k weights. See
   [extensions/arbuffer/README.md](extensions/arbuffer/README.md).
-- [extensions/aline/](extensions/aline/): a **non-core** extension implementing
+- [extensions/aline/](extensions/aline/): an extension implementing
   ALINE (Huang et al., 2025) — joint amortized Bayesian inference and active
   data acquisition — on the GP-1D task, warm-started from a trained GP-1D
   checkpoint. The inference network is the unchanged core ACE (parameter and

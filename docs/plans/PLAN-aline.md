@@ -9,7 +9,7 @@ Phase 6 doc items, 2026-06-12).
 
 Reference: Huang, Wen, Bharti, Kaski & Acerbi (2025), *ALINE: Joint Amortization for
 Bayesian Inference and Active Data Acquisition* (NeurIPS 2025). Paper markdown in
-`temp/aline.md` (§3.1–3.4 objectives/architecture, Algorithm 1 + B.2 training/embedding
+`extensions/aline/paper/` (§3.1–3.4 objectives/architecture, Algorithm 1 + B.2 training/embedding
 details, Fig. A1 attention masks, §4.1/C.1 the GP active-learning experiment this
 extension reproduces). Design discussion resolved 2026-06-12 (recorded below and in the
 extension's local DEVLOG once created).
