@@ -29,8 +29,13 @@
           sans-serif;
         color: var(--fg);
         background: #fafafa;
+        /* Sticky-footer layout: main grows, so the footer never floats mid-page. */
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
       header {
+        width: 100%;
         padding: 18px 22px 0;
         max-width: var(--page-max);
         margin: 0 auto;
@@ -76,6 +81,7 @@
         opacity: 0.7;
       }
       .tabs {
+        width: 100%;
         display: flex;
         gap: 6px;
         max-width: var(--page-max);
@@ -101,9 +107,32 @@
         margin-bottom: -1px;
       }
       main {
+        width: 100%;
         max-width: var(--page-max);
         margin: 0 auto;
-        padding: 20px 22px 60px;
+        padding: 20px 22px 32px;
+        flex: 1;
+      }
+      footer {
+        width: 100%;
+        max-width: var(--page-max);
+        margin: 0 auto;
+        padding: 10px 22px 12px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        /* Pinned to the viewport bottom; content scrolls behind it, and at the
+           end of the page it settles into its natural in-flow position. */
+        position: sticky;
+        bottom: 0;
+        background: #fafafa;
+        z-index: 10; /* below the modal (20) */
+      }
+      footer p {
+        margin: 0;
+      }
+      footer a {
+        color: var(--accent);
       }
       .panel {
         display: none;
@@ -153,6 +182,10 @@
         margin: 10px 0 0;
         color: #374151;
       }
+      .ace-modal h3 {
+        margin: 14px 0 0;
+        font-size: 13.5px;
+      }
       .ace-modal .explain-footer {
         margin-top: 16px;
         font-size: 12px;
@@ -173,10 +206,7 @@
   <body>
     <header>
       <h1>nanoACE playground</h1>
-      <p>
-        Interactive amortized probabilistic conditioning in your browser. See
-        <a href="https://github.com/acerbilab/nanoACE">nanoACE</a>.
-      </p>
+      <p>Interactive amortized probabilistic conditioning in your browser.</p>
       <div class="header-actions">
         <button
           class="header-btn ace-info-toggle"
@@ -225,6 +255,22 @@
       </section>
     </main>
 
+    <footer>
+      <p>
+        Demo built on
+        <a href="https://github.com/acerbilab/nanoACE">nanoACE</a>, a small
+        readable implementation of the Amortized Conditioning Engine (<a
+          href="https://acerbilab.github.io/amortized-conditioning-engine/"
+          >ACE</a
+        >) — work by the
+        <a
+          href="https://www.helsinki.fi/en/researchgroups/machine-and-human-intelligence"
+          >Machine and Human Intelligence research group</a
+        >
+        at the University of Helsinki and collaborators.
+      </p>
+    </footer>
+
     <div class="ace-modal" id="ace-modal" hidden>
       <div
         class="ace-modal-card"
@@ -237,31 +283,10 @@
           <button class="ace-modal-close" type="button">Close</button>
         </div>
         <p>
-          ACE, the Amortized Conditioning Engine, is a transformer-based
-          probabilistic model. It is trained on many simulated problem instances
-          so that, at runtime, one forward pass can return probabilistic
-          predictions of interest instead of solving a new inference problem
-          from scratch.
-        </p>
-        <p>
-          It sits in the same broad family as Prior-Fitted Networks (PFNs) and
-          Transformer Neural Processes (TNPs), and not so different from modern
-          large language models (LLMs): models that learn to make predictions
-          based on — <em>conditioning</em> on — a provided set of observed data (called
-          the context, and encoded as tokens). ACE extends that idea by treating
-          more than just observed data as tokens. Observations, unknown queries,
-          interpretable latent variables, and prior information available at
-          runtime can all appear as tokens in the conditioning set.
-        </p>
-        <p>
-          That means ACE can condition on data, known parameter values, or a
-          user's prior belief about the problem, and it can predict new data as
-          well as task-relevant quantities like model parameters, class labels,
-          or the location of an optimum. The examples here show those
-          token-level conditioning capabilities in small, inspectable tasks
-          using compact pretrained networks that run in your browser. These
-          browser models are intentionally small, so expect some imperfections;
-          larger deployed ACE models perform better.
+          ACE, the <em>Amortized Conditioning Engine</em>, is a
+          transformer-based probabilistic model: instead of solving each new
+          inference problem from scratch, it returns the predictions of interest
+          in a single forward pass.
         </p>
         <p class="explain-footer">
           ACE was developed by the
@@ -273,6 +298,48 @@
           <a href="https://acerbilab.github.io/amortized-conditioning-engine/"
             >ACE project page</a
           >.
+        </p>
+        <h3>Amortized inference</h3>
+        <p>
+          Classically, every new dataset is its own inference problem: you run a
+          computation against that specific data — optimization, sampling,
+          numerical integration — and rerun it when the data changes. Amortized
+          inference moves the cost up front: a neural network is trained on many
+          simulated problem instances; afterwards, solving each new problem is
+          <em>fast</em>. The training effort is <em>amortized</em>
+          over all future uses — hence the name. The trade-off is that answers
+          are approximate, and reliable only within the distribution of problems
+          the network was trained on.
+        </p>
+        <h3>Transformer probabilistic models</h3>
+        <p>
+          ACE sits in the same broad family as Prior-Fitted Networks (PFNs) and
+          Transformer Neural Processes (TNPs), and is not so different from
+          modern large language models (LLMs): all learn to make predictions by
+          <em>conditioning</em> on a provided set of observations (the
+          <em>context</em>, encoded as tokens). LLMs predict the next word
+          (token) of a text; ACE predicts all sorts of quantities of interest.
+        </p>
+        <h3>Everything is a token</h3>
+        <p>
+          ACE extends what a token can be. Observed data, interpretable latent
+          variables, and prior information supplied at runtime all enter the
+          same token set; the model conditions on one set of tokens and predicts
+          distributions over another. Both sets can mix data with task-relevant
+          quantities — model parameters, class labels, the location of an
+          optimum — which lets one model cover a variety of scientific and
+          machine-learning tasks.
+        </p>
+        <h3>In this playground</h3>
+        <p>
+          Each tab is a small, inspectable task running a compact pretrained
+          network in your browser. Every click, drag, or slider edit poses a
+          fresh conditioning problem — the instant updates are amortization at
+          work. Each tab's "?" button explains the task and the classical
+          computation that the forward pass replaces. The browser models are
+          intentionally small, so expect some imperfections (larger deployed ACE
+          models perform better); warnings appear inside the plots when you
+          leave the training distribution.
         </p>
       </div>
     </div>

@@ -33,6 +33,16 @@ Simulation and Inference* (AISTATS 2025). Paper markdown lives in `paper/`.
   draw; the timing line reports cost *per draw* so the two modes compare directly
   (~20× slower per draw at 4 context points and K=64, growing with context size and
   chain length). Deliberately didactic: same model, same factorization, no cache.
+- **The global "What is ACE?" modal now teaches amortization.** One-line ACE
+  definition first, then four titled sections (per-tab explainer style); the new
+  "Amortized inference" section defines the term the tab modals use in passing,
+  trade-off included. Attribution moved up under the intro.
+- **Slim sticky page footer.** One muted line (built on nanoACE, ACE project page,
+  work by the MHI group and collaborators), `position: sticky; bottom: 0` so it
+  stays visible; fuller references live in the modals. Hassan et al. (2026) deliberately stays in the AR
+  tab's "?" modal (contextual, not bibliography). Inside the "What is ACE?" modal the
+  attribution line moved from the bottom to right under the intro paragraph so it is
+  visible without scrolling; it stays in the modal too, so the dialog stands alone.
 
 ---
 
