@@ -52,24 +52,30 @@ const EXPLAINER = {
     lengthscale can want quite different ones. Classically this needs a fitted surrogate
     (e.g. a GP) plus a hand-chosen acquisition rule per goal, re-optimized at every step.</p>
     <h3>What this tab is doing</h3>
-    <p>ALINE is one network that both <em>infers</em> and <em>acts</em>. The inference
-    side is exactly the GP-1D ACE model: posteriors over the latents and a predictive
-    band over the function. The new part is a small policy head that scores every
-    candidate query by how informative it should be <em>for the currently selected
-    goal</em> — the orange distribution along the bottom axis, recomputed in one forward
-    pass per step. It was trained with reinforcement learning, the reward being the
-    model's own step-to-step improvement in the log-probability of the goal
-    (self-estimated information gain; Huang et al., 2025). The goal is just "which
-    target tokens are active", so switching it — even mid-episode — is instant.</p>
+    <p>The demo draws a random GP function and hides it; every query — your click, or
+    the policy's pick — measures its true value at one location, with a budget of 16
+    measurements per episode. ALINE is one network that both <em>infers</em> and
+    <em>acts</em>. The inference side is exactly the GP-1D ACE model: posteriors over
+    the latents and a predictive band over the function. The new part is a small
+    policy head that scores every candidate location by how informative measuring
+    there should be <em>for the currently selected goal</em> — the orange distribution
+    along the bottom axis, recomputed in one forward pass after every measurement. It
+    was trained with reinforcement learning, the reward being the model's own
+    step-to-step improvement in the log-probability of the goal (self-estimated
+    information gain; Huang et al., 2025). Inside the model a goal is just a choice of
+    target tokens, so switching goals — even halfway through an episode — is
+    instant.</p>
     <h3>Compared with the classical approach</h3>
     <p>The green marker shows what uncertainty sampling (query where the predictive
     variance is largest — a strong classical baseline) would pick from the same model.
     Where the orange and green markers separate, the learned policy is deviating from
-    the heuristic. Honest caveat: this checkpoint is an early validation fine-tune
-    (≈2.5k policy updates, far short of the paper's budget) — it reliably beats random
-    querying, but does not yet beat uncertainty sampling on prediction, and its
-    goal-targeting differences are subtle. The tab's mechanics are exactly what a
-    longer-trained checkpoint will drop into.</p>
+    the heuristic. Classical pipelines refit a surrogate and re-optimize an acquisition
+    rule at every step, and need a different rule for each goal; here one forward pass
+    answers "where should I measure next, for this goal?" directly. The honest
+    trade-off: the policy is only as good as its training — this demo's policy
+    reliably beats random querying, but a well-tuned uncertainty-sampling baseline is
+    still competitive on pure prediction, and the goal-targeting differences can be
+    subtle.</p>
     ${aceFooter(
       'The acquisition policy follows Huang, Wen, Bharti, Kaski &amp; Acerbi (2025), <em>ALINE: Joint Amortization for Bayesian Inference and Active Data Acquisition</em> (NeurIPS 2025) — <a href="https://github.com/huangdaolang/aline">reference implementation</a>.',
     )}`,
@@ -163,12 +169,13 @@ export async function mountAline(el: HTMLElement): Promise<void> {
   const root = document.createElement("div");
   root.className = "al-root";
   root.innerHTML = `
-    <p class="al-hint">Active data acquisition with ALINE
+    <p class="al-hint">Active learning with ALINE
       (<a href="https://github.com/acerbilab/nanoACE/tree/main/extensions/aline">extensions/aline</a>):
-      a hidden function answers your queries — you only choose <em>where</em> to sample.
-      The orange curve along the bottom is the policy's advice π(x | data, goal) for the
-      selected goal; follow it, ignore it, or let it drive. Switch the goal any time —
-      including mid-episode.</p>
+      the app has drawn a random function and keeps it hidden. Click the plot to
+      measure it at that location — each click reveals one true value and the model
+      updates its predictions. The orange curve along the bottom shows where ALINE's
+      learned policy would measure next for the selected goal: click there yourself,
+      press Step, or press Follow policy. You can change the goal at any time.</p>
     <div class="al-top">
       <div class="al-plot-col">
         <canvas class="al-main" width="660" height="380" style="width:660px;height:380px;"></canvas>
@@ -181,8 +188,8 @@ export async function mountAline(el: HTMLElement): Promise<void> {
       <div class="al-controls">
         <fieldset>
           <legend>mode</legend>
-          <label class="al-row"><input type="radio" name="al-mode" class="al-mode-episode" checked/>hidden function (episode)</label>
-          <label class="al-row"><input type="radio" name="al-mode" class="al-mode-oracle"/>your own data</label>
+          <label class="al-row"><input type="radio" name="al-mode" class="al-mode-episode" checked/>measure a hidden function</label>
+          <label class="al-row"><input type="radio" name="al-mode" class="al-mode-oracle"/>enter your own points</label>
         </fieldset>
         <fieldset>
           <legend>goal — what should the queries teach the model?</legend>
