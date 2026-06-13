@@ -46,10 +46,12 @@ OUT_DIR = Path(__file__).resolve().parent / "test" / "fixtures"
 # regenerable.
 ARBUF_CKPT = REPO_ROOT / "artifacts" / "gp1d_arbuffer.pt"
 
-# The ALINE active-learning fine-tune (extensions/aline/; currently the 5k
-# validation artifact — swap in the longer run by re-running export + this script
-# together). Parity fixtures are gated like arbuffer's; the env fixture below is
-# checkpoint-independent and regenerates on every run.
+# The ALINE active-learning fine-tune (extensions/aline/; the 35k run, promoted
+# to the canonical name 2026-06-13 — see extensions/aline/DEVLOG.md; the 5k
+# validation artifact is preserved as gp1d_aline_5k.pt). Swap in a longer run by
+# re-running export + this script together. Parity fixtures are gated like
+# arbuffer's; the env fixture below is checkpoint-independent and regenerates on
+# every run.
 ALINE_CKPT = REPO_ROOT / "artifacts" / "gp1d_aline.pt"
 
 

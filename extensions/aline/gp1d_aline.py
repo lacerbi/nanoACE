@@ -1007,7 +1007,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-baseline", action="store_true", help="disable the batch-mean reward baseline")
     p.add_argument("--reward-to-go", action="store_true", help="weight log pi_t by the reward-to-go instead of R_t")
     p.add_argument("--sigma-obs", type=float, default=0.0, help="observation noise added at lookup (0 = noiseless)")
-    p.add_argument("--eval-episodes", type=int, default=128)
+    p.add_argument("--eval-episodes", type=int, default=512)
     p.add_argument("--oracle-episodes", type=int, default=4, help="acquired contexts to score against the grid oracle")
     p.add_argument("--oracle-bins", type=int, default=64)
     p.add_argument("--oracle-chunk", type=int, default=512)
