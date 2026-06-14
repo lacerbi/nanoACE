@@ -57,6 +57,7 @@ const CSS = `
 .bo-controls { display: flex; flex-direction: column; gap: 12px; min-width: 270px; }
 .bo-controls fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0; padding: 8px 10px; }
 .bo-controls legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
+.bo-note { color: var(--muted); font-size: 11px; margin: 0 0 6px; }
 .bo-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .bo-row label { width: 46px; color: var(--muted); }
 .bo-row input[type=range] { flex: 1; }
@@ -132,12 +133,14 @@ export async function mountBO(el: HTMLElement): Promise<void> {
       <div class="bo-controls">
         <fieldset>
           <legend>x_opt</legend>
+          <p class="bo-note">Set the prior over the optimum location.</p>
           <label class="bo-row"><input type="checkbox" class="pin-x"/>fix known value</label>
           <div class="bo-row"><label>mean</label><input type="range" class="x-mean"/><span class="val x-mean-v"></span></div>
           <div class="bo-row"><label>conc.</label><input type="range" class="x-nu"/><span class="val x-nu-v"></span></div>
         </fieldset>
         <fieldset>
           <legend>y_opt</legend>
+          <p class="bo-note">Set the prior over the optimum value.</p>
           <label class="bo-row"><input type="checkbox" class="pin-y"/>fix known value</label>
           <div class="bo-row"><label>mean</label><input type="range" class="y-mean"/><span class="val y-mean-v"></span></div>
           <div class="bo-row"><label>conc.</label><input type="range" class="y-nu"/><span class="val y-nu-v"></span></div>
