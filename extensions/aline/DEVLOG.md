@@ -12,6 +12,79 @@ a local clone.
 
 ---
 
+## 2026-06-14 — from-base n=2 (35k): a real kernel-targeting gain over n=1, at a predictive-RMSE cost
+
+The from-base run queued as the TODO below (now marked done). It answers the
+basin question and, unlike the fine-tune, finds a **statistically significant**
+credit-window effect — the first positive result for `--credit-n > 1`.
+
+**The run.** n=2 warm-started from the base GP-1D ACE checkpoint
+(`--base-checkpoint artifacts/gp1d.pt --credit-n 2 --steps 35000`, full recipe:
+policy-lr 3e-4, no special warmup, defaults otherwise), recipe-matched to the
+existing 35k n=1 (`gp1d_aline_35k.pt`) — which *is* the from-base n=1 baseline,
+so the comparison is controlled by construction. Artifact
+`artifacts/gp1d_aline_n2_frombase.pt` (+ `.png`).
+
+**Environment caveat (not a code bug): two transient CUDA faults, recovered via
+step-checkpoints.** First launch died at step 3101 (`IndexKernel` index-OOB); a
+bit-identical relaunch sailed *past* 3101 and died at step 23300
+(`ScatterGatherKernel` OOB + `CUBLAS_STATUS_EXECUTION_FAILED`). Different steps,
+different kernels, on the identical deterministic trajectory = a flaky GPU
+(transient VRAM/compute faults under sustained load), not a logic error — a real
+bug recurs at the *same* step. Recovered by resuming from the last
+`--ckpt-every 1000` checkpoint (re-passing `--credit-n 2`, which is **not**
+restored on resume — silently reverts to myopic otherwise). Tooling lesson:
+piping through `tee` swallowed python's non-zero exit on the first crash
+(reported "exit 0"), masking the failure; use a direct `> log 2>&1` redirect so
+the harness sees the real exit code.
+
+**Result — paired 16k bootstrap (n2_frombase − n1, both 35k, identical
+`EVAL_SEED` episodes, only `--credit-n` differs):**
+
+| paired δ (n2_frombase − n1) | Δ | 95% CI | |
+| --- | --- | --- | --- |
+| **kernel contrast** | **+0.028** | [+0.015, +0.041] | **significant** |
+| **RMSE@T (ALINE)** | **+0.009** | [+0.007, +0.011] | **significant (n2 worse)** |
+| **RMSE gap-to-US** | **+0.008** | [+0.006, +0.011] | **significant (n2 worse)** |
+| ℓ contrast | −0.007 | [−0.020, +0.006] | n.s. |
+| θ log q margin | +0.003 | [−0.003, +0.010] | n.s. |
+
+(Aggregates: n1 RMSE 0.192 / ℓδ +0.043 / kernelδ +0.124; n2_frombase RMSE 0.201
+/ ℓδ +0.035 / kernelδ +0.152. Calibration clean for both, kernel KL 0.005–0.024.)
+
+- **n=2 credit is a targeting-vs-prediction trade.** Anticipatory credit buys a
+  significantly higher kernel-targeting contrast (+0.028, ~23% over the +0.12
+  base) — the two-query-coordination payoff the knob was built for, since kernel
+  identification wants tight local pairs that conflict with coverage. It costs
+  predictive RMSE (+0.009) and a wider gap-to-US (+0.008): queries are
+  reallocated off coverage toward parameter targeting. ℓ contrast and θ-logq are
+  unchanged — consistent with ℓ being coverage-pinned in GP-1D regardless of
+  credit; only the kernel goal, which genuinely conflicts with coverage, responds.
+- **Basin question, answered (with a confound).** The *fine-tune* n2 vs n1
+  showed kernel contrast +0.007 (n.s. — see the entry below); the *from-base* n2
+  shows +0.028 (significant). So the credit-window effect surfaces only when
+  trained from base, not by nudging the converged n=1 policy. Honest confound:
+  from-base also had more budget and full LR (35k @ 3e-4 vs the fine-tune's 10k
+  @ 1e-4), so "basin-trapped" and "under-trained" cannot be separated here. But
+  the practical lesson is the same either way — **train the credit window from
+  base, not as a gentle fine-tune** — and there is **no hard task ceiling** on
+  kernel targeting (the standing ceiling hypothesis was wrong for kernel; it
+  still holds for ℓ).
+- **Caveats.** Magnitudes are small (~0.03 / ~0.01) and this is **one training
+  seed** — eval-sampling is nailed (16k bootstrap) but training-seed variance is
+  not controlled, so hold the exact numbers loosely. Trust the *contrast* result
+  over the RMSE magnitude: across the 512→2048→16k sweep the contrasts were the
+  well-behaved (consistent, tightly bounded) statistics while RMSE was
+  heavy-tailed and wandered sign.
+
+**Outcome:** **not promoted** — predictive RMSE regresses significantly, which
+matters for the served/playground model, so the served checkpoint stays the 35k
+n=1 `gp1d_aline.pt`. The from-base n2 is retained as a research artifact,
+`gp1d_aline_n2_frombase.pt`. The comparison was run with the now-parameterized
+harness `scripts/analyze_n2.py PATH_A PATH_B [LABEL_A LABEL_B]`.
+
+---
+
 ## 2026-06-13 — n=2 credit fine-tune (10k): no material change vs 35k; 512-ep eval shown to be underpowered; default eval → 16k
 
 Ran the n-step knob from the 35k endpoint and checked it properly. The headline
@@ -85,8 +158,8 @@ digit at 16k.
 `artifacts/gp1d_aline.pt`; n2 is retained separately as `gp1d_aline_n2.pt`. The
 paired-bootstrap harness is kept at `extensions/aline/scripts/analyze_n2.py`.
 
-**Next (TODO — not yet run): n=2 from the base ACE checkpoint, not the n=1
-policy.** The above fine-tune warm-started from the n=1-converged 35k policy at
+**Next (DONE 2026-06-14 — see the entry above): n=2 from the base ACE
+checkpoint, not the n=1 policy.** The above fine-tune warm-started from the n=1-converged 35k policy at
 a deliberately gentle `--policy-lr 1e-4`, so it may have been trapped in the n=1
 basin rather than finding a distinct n=2 optimum — the nulls would then reflect
 "couldn't move," not "nothing to find." The clean test trains n=2 from the base
