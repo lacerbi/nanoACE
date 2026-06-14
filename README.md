@@ -24,103 +24,54 @@ This project is based on:
 
 Local paper markdown is in [paper/](paper/).
 
-## Current Status
+## What's inside
 
-Implemented modules:
+nanoACE is meant to be **read and run**. To play with it: install (below), then
+run any example or open the playground. For the *why* behind each design
+decision, read [DEVLOG.md](DEVLOG.md) and the code.
 
-- [ace.py](ace.py): core `Variable`, `Tokens`, `Batch`, bounded-latent
-  coordinate helpers, ACE transformer, shared continuous MDN head, shared masked
-  categorical head, prediction object, loss, and autoregressive sampling helper.
-- [ace_prior_beta.py](ace_prior_beta.py): Beta-specific ACEP runtime-prior
-  helpers that build and score the two-feature `(mean, spread)` information
-  tokens used by the prior-conditioning examples. Model-side PRIOR token
-  semantics live in [ace.py](ace.py).
-- [train.py](train.py): shared training infrastructure for the examples — the
-  Adam + grad-clip loop (`fit`), cosine LR (default) or constant, simple resume,
-  checkpoint save/load, model construction, and a `common_parser()` argparse
-  parent with a light-YAML `--config`. `fit` reseeds the global RNG with
-  `mix_seed(seed, step)` each step, so the training stream is a pure function of
-  `(seed, step)` — reproducible and resume-exact. Each example keeps its own
-  `main()`, sampler, and diagnostics; `fit` takes a `(step) -> Batch` thunk, which
-  the online samplers and the `data.py` `PoolReader` both satisfy (one training path).
-- [data.py](data.py): optional offline sharded data pool (generate → save → train)
-  for the expensive examples (GP-1D, BO). `write_pool` caches only the per-instance
-  physics; `PoolReader` reads it back through the same `assemble` the online path
-  uses, recomputing the context/target split and reveal mask from a stateless
-  `(seed, position)` hash (batch-size-independent, resume-exact). It lazy-loads shards
-  through a bounded cache and prefetches upcoming batch shards. A manifest carries the
-  `variables()` schema and a DGP config-hash as the staleness guard. Build with
-  `python data.py <gp1d|bo1d> --out DIR --pool-size N`.
-- [gaussian_toy.py](gaussian_toy.py): Gaussian ACEP toy with two bounded
-  continuous latents, runtime Beta information tokens, online
-  training/evaluation CLI, analytic grid posterior, posterior predictive,
-  checkpoint helpers, and plotting.
-- [gp1d.py](gp1d.py): GP-1D regression example with continuous kernel
-  hyperparameter latents, discrete kernel selection, online CPU float64 GP
-  sampling, numerical grid posterior oracle, and a fixed diagnostic plot.
-- [sbi_sir.py](sbi_sir.py): SIR simulation-based-inference example with two
-  continuous rate latents (`beta`, `gamma`), online deterministic-ODE simulation
-  with Gaussian observation noise, runtime Beta prior injection, a numerical
-  `(beta, gamma)` grid posterior oracle, and a fixed diagnostic that contrasts a
-  uniform against an informative runtime prior.
-- [bo1d.py](bo1d.py): 1D Bayesian optimization example with the global optimum's
-  location `x_opt` and value `y_opt` as latents (properties of the specific
-  sampled function), an optimum-planting GP data-generating process, runtime Beta
-  prior injection over the optimum location with an epsilon-contamination
-  ("robust prior") floor, and a fixed diagnostic contrasting a uniform, a correct,
-  and a wrong runtime prior. This is the one example with no oracle.
-- [diagnostics.py](diagnostics.py): reusable grid-query helpers for marginal and
-  two-variable AR diagnostics.
-- [playground/](playground/): a fully in-browser TypeScript demo
-  (separate toolchain) where trained models run client-side — GP-1D, Gaussian,
-  SIR, and BO-1D, with interactive conditioning, latent/prior controls, and
-  oracle overlays where practical. BO-1D stays no-oracle and overlays
-  optimum-location/value marginals on the editable regression plot. A fifth
-  tab runs the AR-buffer extension's coherent joint sampling, and a sixth
-  runs the ALINE extension's active-learning loop (see below).
-  See [playground/README.md](playground/README.md). The Python core stays
-  torch-only; the playground is an example built on a parity-tested TS port of
-  `ace.py`'s forward pass.
-- [extensions/arbuffer/](extensions/arbuffer/): an extension adding
-  the causal autoregressive buffer of Hassan et al. (2026) on top of a trained
-  GP-1D checkpoint. Two target-read variants: a separate zero-init gated read
-  (bit-exact warm start, frozen base) and the retained paper-style
-  `--concat-read` (one softmax over `[context, buffer]` keys, joint fine-tune;
-  ~95% of the slow-AR joint-density gap recovered at the 20k validation
-  budget). Encodes the context once and draws many coherent joint
-  function samples from the cached encoding (vs `sample_ar`'s per-step
-  re-encoding), plus one-pass joint density evaluation. Also the repository's
-  extensibility demo (no core file changes). A playground tab runs its
-  incremental sampler in the browser — the TS port follows the retained
-  concat-read architecture and serves the retained 200k weights. See
-  [extensions/arbuffer/README.md](extensions/arbuffer/README.md).
-- [extensions/aline/](extensions/aline/): an extension implementing
-  ALINE (Huang et al., 2025) — joint amortized Bayesian inference and active
-  data acquisition — on the GP-1D task, warm-started from a trained GP-1D
-  checkpoint. The inference network is the unchanged core ACE (parameter and
-  predictive targets are QUERY tokens; the acquisition goal is _which target
-  tokens are active_); the only new model part is a small read-only policy
-  decoder that scores a candidate pool, trained with REINFORCE on
-  self-estimated information gain, with a structural gradient firewall between
-  the two. The inference path is asserted bit-equal to the base ACE forward.
-  A playground tab runs the full acquisition loop in-browser
-  against a hidden GP function (the user picks where to sample; the policy
-  advises; goals switch live). See
-  [extensions/aline/README.md](extensions/aline/README.md).
-- [DEVLOG.md](DEVLOG.md): design decisions and rationale. Read this before
-  changing architecture or scope.
+### Runnable examples
 
-Current playground weights are hosted [outside this repo](https://github.com/acerbilab/nanoACE-playground-weights).
-They are exported from retained runs under the shared multi-latent reveal DGP:
-Gaussian 80k steps, GP-1D 200k, SIR 100k, and BO-1D 200k — plus the AR-buffer
-model (a 200k concat-read fine-tune on top of the GP-1D checkpoint) and the
-ALINE model (a 35k active-learning fine-tune on top of the same GP-1D checkpoint).
-Local `artifacts/` and `playground/public/models/` remain gitignored in nanoACE.
+Standalone scripts — each trains online, prints a fixed diagnostic against an
+oracle (where one exists), and optionally saves a plot/checkpoint:
 
-Next work: inspect the deployed Pages build against the public weights (now
-six models, including the ALINE tab), add manifest-level training
-provenance on the next export, and consider whether the shared prior path
-warrants a discrete-latent runtime prior.
+- **[Gaussian ACEP](#gaussian-acep)** — infer a Gaussian's `mu`/`log_sigma` with
+  runtime Beta priors, against an analytic oracle.
+- **[GP-1D](#gp-1d)** — GP regression with kernel hyperparameters and a discrete
+  kernel choice as latents, against a grid oracle.
+- **[SIR SBI](#sir-sbi)** — simulation-based inference of epidemic rates, with a
+  uniform-vs-informative prior contrast.
+- **[BO-1D](#bo-1d)** — 1D Bayesian optimization with the optimum location/value
+  as latents and robust runtime prior injection (the one example with no oracle).
+
+### Playground
+
+An interactive, fully **in-browser** demo where trained models run client-side —
+all four examples plus the two extensions, with live conditioning and prior
+controls. See [playground/README.md](playground/README.md).
+
+### Extensions
+
+Non-core add-ons built on a trained checkpoint, each self-contained and changing
+no core file (more in [Examples → Extensions](#extensions-1) below):
+
+- **[arbuffer](extensions/arbuffer/README.md)** — fast coherent joint function
+  sampling via a causal autoregressive buffer (Hassan et al., 2026).
+- **[aline](extensions/aline/README.md)** — joint amortized inference + active
+  data acquisition, ALINE (Huang et al., 2025).
+
+### Core modules
+
+For how it works, read these (and [DEVLOG.md](DEVLOG.md) for the why):
+`ace.py` is the model (schema, embedder, attention, heads, loss, AR sampler),
+`ace_prior_beta.py` the Beta runtime-prior helpers, `train.py` the shared
+training/checkpoint/CLI spine, `data.py` the optional offline data pool, and
+`diagnostics.py` the grid-query helpers.
+
+Trained playground weights live
+[outside this repo](https://github.com/acerbilab/nanoACE-playground-weights)
+(Gaussian 80k, GP-1D 200k, SIR 100k, BO-1D 200k, plus the two extension
+fine-tunes); local `artifacts/` and `playground/public/models/` stay gitignored.
 
 ## Setup
 
@@ -393,6 +344,25 @@ Reuse a saved BO checkpoint and regenerate the prior-contrast plot:
 ```powershell
 .\.venv\Scripts\python.exe bo1d.py --eval-only --load-checkpoint artifacts\bo1d.pt --plot-path artifacts\bo1d.png
 ```
+
+### Extensions
+
+Two non-core extensions build on a trained checkpoint without changing any core
+file. Each has its own README with the full run recipe, and a local DEVLOG with
+the design rationale:
+
+- **[extensions/arbuffer/](extensions/arbuffer/README.md)** — the causal
+  autoregressive buffer of Hassan et al. (2026). Encodes a GP context once, then
+  draws many coherent joint function samples from the cache (vs `sample_ar`'s
+  per-step re-encoding), plus one-pass joint density evaluation. Warm-started
+  from a GP-1D checkpoint; also the repository's extensibility demo.
+- **[extensions/aline/](extensions/aline/README.md)** — ALINE (Huang et al.,
+  2025): joint amortized inference + active data acquisition on GP-1D. The
+  inference network is the unchanged core ACE; a small read-only policy decoder
+  picks where to sample next, trained with REINFORCE. Warm-started from a GP-1D
+  checkpoint.
+
+Both also appear as playground tabs.
 
 ## Design Notes
 
