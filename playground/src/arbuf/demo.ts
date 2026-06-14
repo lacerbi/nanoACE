@@ -141,7 +141,7 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
     { x: 0.5, y: 0.05 },
   ];
   const points: Point[] = defaultPoints.map((p) => ({ ...p }));
-  const pin: PinState = { kernel: 0, ell: false, scale: false };  // RBF selected by default
+  const pin: PinState = { kernel: 0, ell: false, scale: false }; // RBF selected by default
   let ellVal = 0.5 * (ellMeta.bound_lo + ellMeta.bound_hi);
   let scaleVal = 0.5 * (scaleMeta.bound_lo + scaleMeta.bound_hi);
   let samplerMode: "buffer" | "slow" = "buffer";
@@ -188,7 +188,7 @@ export async function mountArbuf(el: HTMLElement): Promise<void> {
         </fieldset>
         <fieldset>
           <legend>sampling</legend>
-          <label class="ab-slider-row"><input type="radio" name="ab-sampler" class="ab-mode-buffer" checked/>AR buffer (context cached)</label>
+          <label class="ab-slider-row"><input type="radio" name="ab-sampler" class="ab-mode-buffer" checked/>our AR buffer (context cached)</label>
           <label class="ab-slider-row"><input type="radio" name="ab-sampler" class="ab-mode-slow"/>slow AR (re-encodes every step)</label>
           <div class="ab-btns">
             <button class="ab-btn ab-resample" title="Reuses the cached context encoding (AR buffer) — only the decode reruns">Resample</button>
