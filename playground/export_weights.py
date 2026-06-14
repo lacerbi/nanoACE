@@ -17,6 +17,9 @@ Usage (from the project venv):
         --checkpoint artifacts/bo1d.pt --out playground/public/models/bo1d
 
 Outputs `<out>/manifest.json` and `<out>/weights.bin` (float16, little-endian).
+The manifest also carries a `provenance` block — the training `config`/`seed`/`step`
+read from the checkpoint plus export-time stamps (commit, timestamp, checksum) — so a
+deployed blob is traceable to the run that produced it.
 
 Weights are stored as float16 to halve the blob size. Parameters are rounded with
 torch's `.half().float()` before serialization; `parity.py` applies the SAME
@@ -27,10 +30,13 @@ references reflect identical values (only float32-vs-float64 arithmetic differs)
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
+import subprocess
 import sys
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -62,7 +68,60 @@ def quantize_fp16_inplace(model) -> None:
         p.data = p.data.half().float()
 
 
-def build_manifest(model, task: str) -> tuple[dict, bytes]:
+def _git_short_sha() -> str | None:
+    """`git rev-parse --short HEAD` for the nanoACE repo, or None if unavailable
+    (git missing, not a repo, etc.) — provenance is best-effort, never fatal."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def _json_safe(obj):
+    """Coerce a value to JSON-native types. Argparse configs are usually already
+    clean; this guards a stray Path/Tensor in the checkpoint config from breaking
+    the manifest write by stringifying it rather than raising."""
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    return str(obj)
+
+
+def build_provenance(checkpoint_path: str | Path) -> dict:
+    """Training-provenance block: what run produced these weights.
+
+    The training `config`/`seed`/`step` are read straight from the checkpoint
+    payload (written by `train.save_checkpoint`; the model-only `load_checkpoint`
+    drops them, so we read the raw payload here), alongside export-time stamps the
+    checkpoint can't know. Degrades to `{checkpoint_only: true}` when the payload
+    carries no `config` (legacy blobs, or intermediate resumable saves that predate
+    the final model-only save where `config` lands)."""
+    path = Path(checkpoint_path)
+    prov: dict = {
+        "checkpoint": path.name,
+        "checkpoint_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "nanoace_commit": _git_short_sha(),
+    }
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    config = payload.get("config")
+    if config is None:
+        prov["checkpoint_only"] = True
+        return prov
+    prov["seed"] = payload.get("seed")
+    prov["step"] = payload.get("step")
+    prov["config"] = _json_safe(config)
+    return prov
+
+
+def build_manifest(model, task: str, provenance: dict | None = None) -> tuple[dict, bytes]:
     """Return (manifest dict, concatenated float16 little-endian weight bytes)."""
 
     cfg = asdict(model.cfg)
@@ -114,6 +173,7 @@ def build_manifest(model, task: str) -> tuple[dict, bytes]:
 
     manifest = {
         "task": task,
+        "provenance": provenance,
         "cfg": cfg,
         "modes": {"VALUE": 0, "PRIOR": 1, "QUERY": 2},
         "derived": {
@@ -145,15 +205,19 @@ def main() -> None:
     model.eval()
     quantize_fp16_inplace(model)
 
-    manifest, blob = build_manifest(model, args.task)
+    provenance = build_provenance(args.checkpoint)
+    manifest, blob = build_manifest(model, args.task, provenance)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     (out / manifest["weights_file"]).write_bytes(blob)
 
+    cfg_prov = provenance.get("config") or {}
     print(f"[{args.task}] {len(manifest['tensors'])} tensors, "
           f"{manifest['total_floats']:,} floats ({len(blob):,} bytes) -> {out}")
+    print(f"  provenance: checkpoint={provenance['checkpoint']} "
+          f"commit={provenance.get('nanoace_commit')} steps={cfg_prov.get('steps', 'n/a')}")
 
 
 if __name__ == "__main__":
