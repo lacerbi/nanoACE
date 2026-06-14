@@ -12,9 +12,10 @@ read end to end and extend. The original research code is stored in
 
 ## What's inside
 
-nanoACE is meant to be **read and run**. To play with it: install (below), then
-run any example or open the playground. For the *why* behind each design
-decision, read [DEVLOG.md](DEVLOG.md) and the code.
+nanoACE is meant to be **read and run**. The quickest taste needs no install:
+play with the trained models in the [live playground](https://acerbilab.github.io/nanoACE/).
+To run things yourself, install (below) and run any example. For the _why_ behind
+each design decision, read [DEVLOG.md](DEVLOG.md) and the code.
 
 ### Runnable examples
 
@@ -34,7 +35,8 @@ oracle (where one exists), and optionally saves a plot/checkpoint:
 
 An interactive, fully **in-browser** demo where trained models run client-side —
 all four examples plus the two extensions, with live conditioning and prior
-controls. See [playground/README.md](playground/README.md).
+controls. **Try it live: [acerbilab.github.io/nanoACE](https://acerbilab.github.io/nanoACE/).**
+To run or build it locally, see [playground/README.md](playground/README.md).
 
 ### Extensions
 
@@ -399,10 +401,10 @@ The work in this repository is based on the following papers. The core model is
 the Amortized Conditioning Engine (ACE):
 
 ```bibtex
-@article{chang2025amortized,
+@inproceedings{chang2025amortized,
   title={Amortized Probabilistic Conditioning for Optimization, Simulation and Inference},
   author={Chang, Paul E and Loka, Nasrulloh and Huang, Daolang and Remes, Ulpu and Kaski, Samuel and Acerbi, Luigi},
-  journal={28th Int. Conf. on Artificial Intelligence & Statistics (AISTATS 2025)},
+  booktitle={The Twenty-eighth International Conference on Artificial Intelligence and Statistics (AISTATS 2025)},
   year={2025}
 }
 ```
@@ -411,12 +413,11 @@ The two extensions in [extensions/](extensions/) build on further work — the
 causal autoregressive buffer (arbuffer) and ALINE:
 
 ```bibtex
-@article{hassan2026efficient,
+@inproceedings{hassan2026efficient,
   title={Efficient Autoregressive Inference for Transformer Probabilistic Models},
   author={Conor Hassan and Nasrulloh Ratu Bagus Satrio Loka and Cen-You Li and Daolang Huang and Paul Edmund Chang and Yang Yang and Francesco Silvestrin and Samuel Kaski and Luigi Acerbi},
   year={2026},
-  journal={International Conference on Learning Representations},
-  url={https://openreview.net/forum?id=5bfUqlOhAH}
+  booktitle={The Fourteenth International Conference on Learning Representations (ICLR 2026)},
 }
 ```
 
@@ -431,3 +432,12 @@ causal autoregressive buffer (arbuffer) and ALINE:
 
 Local paper markdown for ACE is in [paper/](paper/); each extension keeps its own
 paper under `extensions/<name>/paper/`.
+
+## Acknowledgments
+
+nanoACE is developed by the [Machine and Human Intelligence (MHI) group](https://www.helsinki.fi/en/researchgroups/machine-and-human-intelligence)
+at the University of Helsinki, with substantial help from AI coding assistants
+(Claude Code and Codex). Work on nanoACE was supported by the Research Council
+of Finland (Flagship programme: Finnish Center for Artificial Intelligence FCAI;
+and grants 358980 and 356498) and by the research environment provided by ELLIS
+Institute Finland.
