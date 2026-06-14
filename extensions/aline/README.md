@@ -42,20 +42,16 @@ Local paper markdown is in [paper/](paper/).
 From the repo root, with a trained GP-1D checkpoint (`python gp1d.py
 --save-checkpoint artifacts/gp1d.pt`):
 
-```powershell
+```bash
 # warm-started joint fine-tune from a trained GP-1D checkpoint
 # (the served model is 35k steps, ~8-9 h on an RTX 4060; use fewer --steps for a quick look)
-.\.venv\Scripts\python.exe extensions\aline\gp1d_aline.py `
-    --base-checkpoint artifacts\gp1d.pt --steps 35000 `
-    --save-checkpoint artifacts\gp1d_aline.pt --ckpt-every 1000
+python extensions/aline/gp1d_aline.py --base-checkpoint artifacts/gp1d.pt --steps 35000 --save-checkpoint artifacts/gp1d_aline.pt --ckpt-every 1000
 
 # short smoke run (from scratch, CPU-friendly)
-.\.venv\Scripts\python.exe extensions\aline\gp1d_aline.py `
-    --steps 20 --batch-size 16 --eval-episodes 16 --oracle-episodes 1
+python extensions/aline/gp1d_aline.py --steps 20 --batch-size 16 --eval-episodes 16 --oracle-episodes 1
 
 # reuse a fine-tuned checkpoint (diagnostics + figure only)
-.\.venv\Scripts\python.exe extensions\aline\gp1d_aline.py `
-    --eval-only --load-checkpoint artifacts\gp1d_aline.pt
+python extensions/aline/gp1d_aline.py --eval-only --load-checkpoint artifacts/gp1d_aline.pt
 ```
 
 Common artifacts: `artifacts/gp1d_aline.pt`, `artifacts/gp1d_aline.png`.

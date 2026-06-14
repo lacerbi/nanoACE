@@ -18,41 +18,46 @@ implementation plans in `docs/plans/`.
 
 ## Commands
 
-Windows / PowerShell, using the project virtualenv explicitly:
+Create and activate the project virtualenv, then run from the repo root. The
+commands call `python` (cross-platform); on Windows PowerShell without
+activating, use `.\.venv\Scripts\python.exe` instead.
 
-```powershell
-# setup (CUDA wheel pinned in requirements.txt: torch 2.11.0+cu128)
+```bash
+# setup: create the venv, activate it, install deps
+#   bash:        source .venv/bin/activate
+#   PowerShell:  .\.venv\Scripts\Activate.ps1
+# (CUDA wheel pinned in requirements.txt: torch 2.11.0+cu128)
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+pip install -r requirements.txt
 
 # run the Gaussian example (trains, then prints oracle-vs-model posterior moments)
-.\.venv\Scripts\python.exe gaussian_toy.py
+python gaussian_toy.py
 
 # run the GP-1D example (trains, then prints oracle-vs-model GP diagnostics)
-.\.venv\Scripts\python.exe gp1d.py
+python gp1d.py
 
 # run the SIR SBI example (trains, then prints oracle-vs-model posteriors under
 # a uniform vs an informative runtime prior)
-.\.venv\Scripts\python.exe sbi_sir.py
+python sbi_sir.py
 
 # run the 1D Bayesian optimization example (trains, then prints x_opt/y_opt
 # posteriors under a uniform, a correct, and a wrong runtime prior; no oracle)
-.\.venv\Scripts\python.exe bo1d.py
+python bo1d.py
 
 # short run that verifies the script starts and completes
-.\.venv\Scripts\python.exe gaussian_toy.py --steps 20 --batch-size 32
-.\.venv\Scripts\python.exe gp1d.py --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe sbi_sir.py --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe bo1d.py --steps 20 --batch-size 16
+python gaussian_toy.py --steps 20 --batch-size 32
+python gp1d.py --steps 20 --batch-size 16
+python sbi_sir.py --steps 20 --batch-size 16
+python bo1d.py --steps 20 --batch-size 16
 
 # verify only the BO data-generating process scale (no training)
-.\.venv\Scripts\python.exe bo1d.py --scale-check
+python bo1d.py --scale-check
 
 # force CPU
-.\.venv\Scripts\python.exe gaussian_toy.py --device cpu --steps 20
-.\.venv\Scripts\python.exe gp1d.py --device cpu --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe sbi_sir.py --device cpu --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe bo1d.py --device cpu --steps 20 --batch-size 16
+python gaussian_toy.py --device cpu --steps 20
+python gp1d.py --device cpu --steps 20 --batch-size 16
+python sbi_sir.py --device cpu --steps 20 --batch-size 16
+python bo1d.py --device cpu --steps 20 --batch-size 16
 ```
 
 There is no separate test suite, linter, or build step. **Verification = run `gaussian_toy.py` and

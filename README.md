@@ -71,12 +71,19 @@ wheel that has been tested on this workstation:
 - NVIDIA RTX 4060 Laptop GPU
 - `PyYAML` (only used by `train.py`'s optional `--config`; pulled in by `requirements.txt`)
 
-PowerShell:
+Create and activate a virtual environment, then install the requirements:
 
-```powershell
+```bash
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# then activate it:
+#   bash:        source .venv/bin/activate
+#   PowerShell:  .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
+
+The commands below assume an activated venv, so they call `python` directly. On
+Windows PowerShell, if you'd rather not activate, call `.\.venv\Scripts\python.exe`
+in place of `python`.
 
 ## Examples
 
@@ -108,8 +115,8 @@ All four examples share the training flags defined in [train.py](train.py):
   latent_context_prob: 0.5
   ```
 
-  ```powershell
-  .\.venv\Scripts\python.exe gp1d.py --config run.yaml --save-checkpoint artifacts\gp1d.pt
+  ```bash
+  python gp1d.py --config run.yaml --save-checkpoint artifacts/gp1d.pt
   ```
 
 The final `--save-checkpoint` is model-only (`cfg`/`seed`/`state_dict`) plus a `config`
@@ -122,11 +129,11 @@ sampling online — the generate → save → train pattern, for the two example
 per-instance physics (GP Cholesky / optimum planting) is the expensive part. Gaussian
 and SIR are cheap and stay online-only.
 
-```powershell
+```bash
 # generate a pool (CPU; shards + a manifest under the output dir)
-.\.venv\Scripts\python.exe data.py gp1d --out artifacts\pool_gp --pool-size 100000
+python data.py gp1d --out artifacts/pool_gp --pool-size 100000
 # train from it (identical diagnostics; --pool replaces online sampling)
-.\.venv\Scripts\python.exe gp1d.py --pool artifacts\pool_gp --steps 20000 --save-checkpoint artifacts\gp1d.pt
+python gp1d.py --pool artifacts/pool_gp --steps 20000 --save-checkpoint artifacts/gp1d.pt
 ```
 
 Only the expensive physics draws are cached; the context/target split and the reveal
@@ -144,8 +151,8 @@ set to 0 to disable).
 
 Run the Gaussian example:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py
+```bash
+python gaussian_toy.py
 ```
 
 The Gaussian example trains online with runtime Beta priors over `mu` and
@@ -167,8 +174,8 @@ in-distribution. The fixed diagnostic uses `EVAL_MU_PRIOR = (0.70, 20.0)` and
 
 Useful Gaussian controls:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --latent-context-prob 0.25
+```bash
+python gaussian_toy.py --latent-context-prob 0.25
 ```
 
 Common artifact names used by the Gaussian example:
@@ -178,35 +185,35 @@ Common artifact names used by the Gaussian example:
 
 Regenerate the longer-run diagnostic and checkpoint pair:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --steps 10000 --save-checkpoint artifacts\gaussian_toy.pt --plot-path artifacts\gaussian_toy.png
+```bash
+python gaussian_toy.py --steps 10000 --save-checkpoint artifacts/gaussian_toy.pt --plot-path artifacts/gaussian_toy.png
 ```
 
 For a short run that verifies the script starts and completes:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --steps 20 --batch-size 32
+```bash
+python gaussian_toy.py --steps 20 --batch-size 32
 ```
 
 To force CPU:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --device cpu --steps 20
+```bash
+python gaussian_toy.py --device cpu --steps 20
 ```
 
 Save and reuse a small Gaussian checkpoint:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --save-checkpoint artifacts/gaussian_toy.pt
-.\.venv\Scripts\python.exe gaussian_toy.py --eval-only --load-checkpoint artifacts/gaussian_toy.pt
+```bash
+python gaussian_toy.py --save-checkpoint artifacts/gaussian_toy.pt
+python gaussian_toy.py --eval-only --load-checkpoint artifacts/gaussian_toy.pt
 ```
 
 ### GP-1D
 
 Run the GP-1D example:
 
-```powershell
-.\.venv\Scripts\python.exe gp1d.py
+```bash
+python gp1d.py
 ```
 
 The GP-1D example trains on functions sampled online from four kernels: RBF,
@@ -228,22 +235,22 @@ Common artifact names used by the GP-1D example:
 
 For a short GP-1D run:
 
-```powershell
-.\.venv\Scripts\python.exe gp1d.py --steps 20 --batch-size 16
+```bash
+python gp1d.py --steps 20 --batch-size 16
 ```
 
 Reuse a saved GP-1D checkpoint and regenerate the oracle comparison plot:
 
-```powershell
-.\.venv\Scripts\python.exe gp1d.py --eval-only --load-checkpoint artifacts\gp1d.pt --plot-path artifacts\gp1d.png
+```bash
+python gp1d.py --eval-only --load-checkpoint artifacts/gp1d.pt --plot-path artifacts/gp1d.png
 ```
 
 ### SIR SBI
 
 Run the SIR SBI example:
 
-```powershell
-.\.venv\Scripts\python.exe sbi_sir.py
+```bash
+python sbi_sir.py
 ```
 
 The SIR example is the simulation-based-inference task: recover the contact rate
@@ -272,23 +279,23 @@ Common artifact names used by the SIR example:
 
 For a short SIR run, or to force CPU:
 
-```powershell
-.\.venv\Scripts\python.exe sbi_sir.py --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe sbi_sir.py --device cpu --steps 20 --batch-size 16
+```bash
+python sbi_sir.py --steps 20 --batch-size 16
+python sbi_sir.py --device cpu --steps 20 --batch-size 16
 ```
 
 Reuse a saved SIR checkpoint and regenerate the prior-contrast plot:
 
-```powershell
-.\.venv\Scripts\python.exe sbi_sir.py --eval-only --load-checkpoint artifacts\sbi_sir.pt --plot-path artifacts\sbi_sir.png
+```bash
+python sbi_sir.py --eval-only --load-checkpoint artifacts/sbi_sir.pt --plot-path artifacts/sbi_sir.png
 ```
 
 ### BO-1D
 
 Run the BO-1D example:
 
-```powershell
-.\.venv\Scripts\python.exe bo1d.py
+```bash
+python bo1d.py
 ```
 
 The BO example is the Bayesian-optimization task: recover the location `x_opt`
@@ -321,16 +328,16 @@ Common artifact names used by the BO example:
 Check only the data-generating-process scale (no training), run a short BO run,
 or force CPU:
 
-```powershell
-.\.venv\Scripts\python.exe bo1d.py --scale-check
-.\.venv\Scripts\python.exe bo1d.py --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe bo1d.py --device cpu --steps 20 --batch-size 16
+```bash
+python bo1d.py --scale-check
+python bo1d.py --steps 20 --batch-size 16
+python bo1d.py --device cpu --steps 20 --batch-size 16
 ```
 
 Reuse a saved BO checkpoint and regenerate the prior-contrast plot:
 
-```powershell
-.\.venv\Scripts\python.exe bo1d.py --eval-only --load-checkpoint artifacts\bo1d.pt --plot-path artifacts\bo1d.png
+```bash
+python bo1d.py --eval-only --load-checkpoint artifacts/bo1d.pt --plot-path artifacts/bo1d.png
 ```
 
 ### Extensions

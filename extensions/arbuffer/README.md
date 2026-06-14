@@ -38,24 +38,20 @@ Local paper markdown is in [paper/](paper/).
 From the repo root, with a trained GP-1D checkpoint (`python gp1d.py
 --save-checkpoint artifacts/gp1d.pt`):
 
-```powershell
+```bash
 # fine-tune the buffer (default mode: separate read, frozen base;
 # ~800k trainable of ~2.0M params)
-.\.venv\Scripts\python.exe extensions\arbuffer\gp1d_arbuffer.py `
-    --base-checkpoint artifacts\gp1d.pt --save-checkpoint artifacts\gp1d_arbuffer.pt
+python extensions/arbuffer/gp1d_arbuffer.py --base-checkpoint artifacts/gp1d.pt --save-checkpoint artifacts/gp1d_arbuffer.pt
 
 # retained fine-tune recipe (paper-style concat read, joint training, 200k)
-.\.venv\Scripts\python.exe extensions\arbuffer\gp1d_arbuffer.py `
-    --steps 200000 --concat-read --no-freeze-base `
-    --save-checkpoint artifacts\gp1d_arbuffer.pt --ckpt-every 5000
+python extensions/arbuffer/gp1d_arbuffer.py --steps 200000 --concat-read --no-freeze-base --save-checkpoint artifacts/gp1d_arbuffer.pt --ckpt-every 5000
 
 # short smoke run
-.\.venv\Scripts\python.exe extensions\arbuffer\gp1d_arbuffer.py --steps 20 --batch-size 16
+python extensions/arbuffer/gp1d_arbuffer.py --steps 20 --batch-size 16
 
 # reuse a fine-tuned checkpoint (demo + diagnostics only; the read mode is
 # inferred from the checkpoint)
-.\.venv\Scripts\python.exe extensions\arbuffer\gp1d_arbuffer.py `
-    --eval-only --load-checkpoint artifacts\gp1d_arbuffer.pt --no-freeze-base
+python extensions/arbuffer/gp1d_arbuffer.py --eval-only --load-checkpoint artifacts/gp1d_arbuffer.pt --no-freeze-base
 ```
 
 Common artifacts: `artifacts/gp1d_arbuffer.pt`, `artifacts/gp1d_arbuffer.png`.

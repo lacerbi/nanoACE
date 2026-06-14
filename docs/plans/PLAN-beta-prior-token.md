@@ -444,9 +444,9 @@ against a Beta-aware analytic oracle.
 - `--bins` help text becomes "oracle/diagnostic grid bins".
 
 **Verification**:
-- [x] `.\.venv\Scripts\python.exe gaussian_toy.py --steps 20 --batch-size 32`
+- [x] `python gaussian_toy.py --steps 20 --batch-size 32`
       completes.
-- [x] `.\.venv\Scripts\python.exe gaussian_toy.py --device cpu --steps 20`
+- [x] `python gaussian_toy.py --device cpu --steps 20`
       completes.
 - [x] A short run prints posterior moments against the oracle; convergence
       tuning is deferred beyond this schema migration.
@@ -471,7 +471,7 @@ coordinates.
 
 **Verification**:
 - [x] `python -c "import gp1d"` imports cleanly.
-- [x] `.\.venv\Scripts\python.exe gp1d.py --steps 20 --batch-size 16`
+- [x] `python gp1d.py --steps 20 --batch-size 16`
       completes.
 
 ### Phase 6: Documentation

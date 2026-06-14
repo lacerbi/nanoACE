@@ -121,12 +121,12 @@ Status: complete.
 
 Short CPU runs completed under the new DGP:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --device cpu --steps 20 --batch-size 32
-.\.venv\Scripts\python.exe gp1d.py --device cpu --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe sbi_sir.py --device cpu --steps 20 --batch-size 16
-.\.venv\Scripts\python.exe bo1d.py --device cpu --steps 20 --batch-size 16 --no-plot
-.\.venv\Scripts\python.exe bo1d.py --scale-check
+```bash
+python gaussian_toy.py --device cpu --steps 20 --batch-size 32
+python gp1d.py --device cpu --steps 20 --batch-size 16
+python sbi_sir.py --device cpu --steps 20 --batch-size 16
+python bo1d.py --device cpu --steps 20 --batch-size 16 --no-plot
+python bo1d.py --scale-check
 ```
 
 The smoke runs verified that reveal-all rows do not break context/target
@@ -141,12 +141,12 @@ and playground parity fixtures reflect this shared reveal DGP.
 
 Required sequence:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --steps 30000 --save-checkpoint artifacts\gaussian_toy.pt --plot-path artifacts\gaussian_toy.png
-.\.venv\Scripts\python.exe gp1d.py --steps 100000 --save-checkpoint artifacts\gp1d.pt --plot-path artifacts\gp1d.png
-.\.venv\Scripts\python.exe playground\export_weights.py --task gaussian --checkpoint artifacts\gaussian_toy.pt --out playground\public\models\gaussian
-.\.venv\Scripts\python.exe playground\export_weights.py --task gp1d --checkpoint artifacts\gp1d.pt --out playground\public\models\gp1d
-.\.venv\Scripts\python.exe playground\parity.py
+```bash
+python gaussian_toy.py --steps 30000 --save-checkpoint artifacts/gaussian_toy.pt --plot-path artifacts/gaussian_toy.png
+python gp1d.py --steps 100000 --save-checkpoint artifacts/gp1d.pt --plot-path artifacts/gp1d.png
+python playground/export_weights.py --task gaussian --checkpoint artifacts/gaussian_toy.pt --out playground/public/models/gaussian
+python playground/export_weights.py --task gp1d --checkpoint artifacts/gp1d.pt --out playground/public/models/gp1d
+python playground/parity.py
 cd playground
 npm test
 ```
@@ -157,9 +157,9 @@ were regenerated from a stale checkpoint.
 
 Reload checks after retraining:
 
-```powershell
-.\.venv\Scripts\python.exe gaussian_toy.py --eval-only --load-checkpoint artifacts\gaussian_toy.pt
-.\.venv\Scripts\python.exe gp1d.py --eval-only --load-checkpoint artifacts\gp1d.pt
+```bash
+python gaussian_toy.py --eval-only --load-checkpoint artifacts/gaussian_toy.pt
+python gp1d.py --eval-only --load-checkpoint artifacts/gp1d.pt
 ```
 
 ### Phase 5: Documentation
